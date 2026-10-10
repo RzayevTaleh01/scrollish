@@ -170,6 +170,8 @@ const FAQ = [
 /** The home page. It sits over the feed, which loads its first videos while this is being read. */
 export function Landing({ open, items, onStart, onLanguage }: Props) {
   const [mounted, setMounted] = useState(true);
+  // Taken out of the page once it has faded away, and put back when the logo brings the visitor home.
+  if (open && !mounted) setMounted(true);
   if (!mounted) return null;
 
   const learn = (language: LanguageId) => {

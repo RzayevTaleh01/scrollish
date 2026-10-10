@@ -57,6 +57,8 @@ function FeedScreen({ landing }: { landing: boolean }) {
   const [status, setStatus] = useState<Status>("loading");
   const [pending, setPending] = useState<FeedPending | null>(null);
   const [started, setStarted] = useState(false);
+  /** The home page is up first, unless a video link was opened, and again whenever the logo is pressed. */
+  const [home, setHome] = useState(landing);
   const [dictionaryOpen, setDictionaryOpen] = useState(false);
   const [likedOpen, setLikedOpen] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -311,6 +313,13 @@ function FeedScreen({ landing }: { landing: boolean }) {
     });
   }, []);
 
+  /** Back to the home page: the video stops and the address is the plain home address again. */
+  const goHome = useCallback(() => {
+    setHome(true);
+    setStarted(false);
+    window.history.replaceState(null, "", "/");
+  }, []);
+
   const toggleMute = useCallback(() => setMuted((m) => !m), []);
 
   const share = useCallback(
@@ -336,6 +345,7 @@ function FeedScreen({ landing }: { landing: boolean }) {
         onTopic={setTopic}
         savedCount={saved.items.filter((i) => i.lang === settings.language).length}
         hidden={headerHidden}
+        onHome={goHome}
         onOpenLiked={() => setLikedOpen(true)}
         onOpenDictionary={() => setDictionaryOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -413,7 +423,7 @@ function FeedScreen({ landing }: { landing: boolean }) {
       {likedOpen && (
         <Liked items={liked} onOpen={openLiked} onRemove={removeLike} onClose={() => setLikedOpen(false)} />
       )}
-      {landing ? (
+      {home ? (
         <Landing
           open={!started}
           items={items}

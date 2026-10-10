@@ -15,6 +15,7 @@ interface Props {
   savedCount: number;
   /** Phones only: the header steps aside while a video plays. */
   hidden?: boolean;
+  onHome: () => void;
   onOpenLiked: () => void;
   onOpenDictionary: () => void;
   onOpenSettings: () => void;
@@ -154,6 +155,7 @@ export function TopBar({
   onTopic,
   savedCount,
   hidden = false,
+  onHome,
   onOpenLiked,
   onOpenDictionary,
   onOpenSettings,
@@ -169,7 +171,9 @@ export function TopBar({
       )}
     >
       <div className="pointer-events-auto mx-auto flex h-14 max-w-6xl items-center gap-2 px-2 max-md:glass max-md:rounded-2xl md:h-auto md:flex-wrap md:gap-x-3 md:gap-y-0 md:px-4">
-        <Logo className="mr-1 md:mr-2" />
+        <button onClick={onHome} aria-label="Scrollish home" className="liquid mr-1 rounded-xl md:mr-2">
+          <Logo />
+        </button>
         {/* Pushes the buttons to the right and, on desktop, sets the height of the navigation row. */}
         <div aria-hidden className="flex-1 md:h-16" />
         <div className="pointer-events-none absolute inset-x-0 top-full px-3 pt-2 md:pointer-events-auto md:static md:order-last md:basis-full md:px-0 md:pb-3 md:pt-0">
