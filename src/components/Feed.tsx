@@ -11,6 +11,7 @@ import { SettingsProvider, useSettings } from "@/lib/settings";
 import type { FeedItem, FeedPending, FeedResponse, Level } from "@/lib/types";
 import { loadYouTubeApi } from "@/lib/youtube-iframe";
 import { Dictionary } from "./Dictionary";
+import { Landing } from "./Landing";
 import { Liked } from "./Liked";
 import { Settings } from "./Settings";
 import { ShortSlide } from "./ShortSlide";
@@ -35,17 +36,18 @@ const POLL_MS = 3000;
 const HEADER_HIDE_MS = 3000;
 const TRANSLATION_KEY = "socialearn:translation";
 
-export function Feed() {
+/** `landing` shows the home page before the feed; without it only the short splash is shown. */
+export function Feed({ landing = false }: { landing?: boolean }) {
   return (
     <SettingsProvider>
       <SavedProvider>
-        <FeedScreen />
+        <FeedScreen landing={landing} />
       </SavedProvider>
     </SettingsProvider>
   );
 }
 
-function FeedScreen() {
+function FeedScreen({ landing }: { landing: boolean }) {
   const saved = useSaved();
   const settings = useSettings();
   const [selectedTopic, setTopic] = useState("all");
@@ -194,11 +196,12 @@ function FeedScreen() {
   }, [query, settings, load]);
 
   // The address bar follows the video on screen, like YouTube, so the page can be copied or reloaded as is.
+  // Not before the first tap: until then the visitor is still on the home page.
   const currentId = items[active]?.id;
   useEffect(() => {
-    if (!currentId) return;
+    if (!currentId || !started) return;
     window.history.replaceState(null, "", `/?v=${currentId}&lang=${settings.language}`);
-  }, [currentId, settings.language]);
+  }, [currentId, started, settings.language]);
 
   // While the server is still analysing the first videos, check again every few seconds.
   useEffect(() => {
@@ -410,7 +413,16 @@ function FeedScreen() {
       {likedOpen && (
         <Liked items={liked} onOpen={openLiked} onRemove={removeLike} onClose={() => setLikedOpen(false)} />
       )}
-      <Splash open={!started} onStart={() => setStarted(true)} />
+      {landing ? (
+        <Landing
+          open={!started}
+          items={items}
+          onStart={() => setStarted(true)}
+          onLanguage={settings.setLanguage}
+        />
+      ) : (
+        <Splash open={!started} onStart={() => setStarted(true)} />
+      )}
     </main>
   );
 }

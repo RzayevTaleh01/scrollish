@@ -170,6 +170,252 @@ button:disabled {
   animation: rise 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+/*
+ * The phone on the home page plays one loop of 15 seconds: three slides of 5 seconds each, and a
+ * fourth that repeats the first so the loop restarts without a jump. Every moving part runs on
+ * that same 15 second clock and is shifted to its own slide (--turn) and its own moment (--at,
+ * seconds into the slide), so one set of keyframes serves all three slides.
+ *
+ * One slide, in seconds: 1.0 a word is tapped and its sheet slides up, 2.5 the word is saved,
+ * 3.3 the sheet is swiped down, 4.5 the video is swiped away. 1% of the loop is 0.15s.
+ */
+.phone-feed {
+  animation: phone-feed 15s cubic-bezier(0.3, 0.9, 0.3, 1) infinite;
+}
+
+.demo-pick,
+.demo-sheet,
+.demo-save,
+.demo-save svg,
+.demo-tap,
+.demo-swipe-down,
+.demo-swipe-up {
+  animation-duration: 15s;
+  animation-iteration-count: infinite;
+  animation-delay: calc(var(--turn, 0) * 5s + var(--at, 0s) - 15s);
+}
+
+@keyframes phone-feed {
+  0%,
+  30% {
+    transform: translateY(0);
+  }
+  33.33%,
+  63.33% {
+    transform: translateY(-100%);
+  }
+  66.66%,
+  96.66% {
+    transform: translateY(-200%);
+  }
+  100% {
+    transform: translateY(-300%);
+  }
+}
+
+/* The tapped word takes the selection color while its sheet is open. */
+.demo-pick {
+  animation-name: demo-pick;
+  animation-timing-function: step-end;
+}
+@keyframes demo-pick {
+  0%,
+  25%,
+  100% {
+    background-color: transparent;
+    color: inherit;
+  }
+  6.67% {
+    background-color: var(--accent);
+    color: var(--accent-ink);
+  }
+}
+
+.demo-sheet {
+  transform: translateY(100%);
+  animation-name: demo-sheet;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes demo-sheet {
+  0%,
+  7% {
+    transform: translateY(100%);
+  }
+  10%,
+  22.5% {
+    transform: translateY(0);
+  }
+  26%,
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+/* The save button and its bookmark fill in when they are tapped. */
+.demo-save {
+  background-color: rgb(255 255 255 / 0.1);
+  animation-name: demo-save;
+  animation-timing-function: step-end;
+}
+@keyframes demo-save {
+  0%,
+  30%,
+  100% {
+    background-color: rgb(255 255 255 / 0.1);
+    color: inherit;
+  }
+  16.67% {
+    background-color: var(--accent);
+    color: var(--accent-ink);
+  }
+}
+.demo-save svg {
+  animation-name: demo-save-mark;
+  animation-timing-function: step-end;
+}
+@keyframes demo-save-mark {
+  0%,
+  30%,
+  100% {
+    fill: none;
+  }
+  16.67% {
+    fill: currentColor;
+  }
+}
+
+/* The fingertip. A tap: it lands, presses 0.6s after it starts, and lifts. */
+.demo-tap,
+.demo-swipe-down,
+.demo-swipe-up {
+  opacity: 0;
+}
+.demo-tap {
+  animation-name: demo-tap;
+}
+@keyframes demo-tap {
+  0% {
+    opacity: 0;
+    scale: 1.5;
+  }
+  2.5% {
+    opacity: 1;
+    scale: 1;
+  }
+  4% {
+    opacity: 1;
+    scale: 0.65;
+  }
+  5.5% {
+    opacity: 1;
+    scale: 1;
+  }
+  8%,
+  100% {
+    opacity: 0;
+    scale: 1.3;
+  }
+}
+
+/* A swipe: the fingertip presses, drags and lets go. */
+.demo-swipe-down {
+  animation-name: demo-swipe-down;
+}
+@keyframes demo-swipe-down {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  2% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  6% {
+    opacity: 1;
+    transform: translateY(110px);
+  }
+  7.5%,
+  100% {
+    opacity: 0;
+    transform: translateY(110px);
+  }
+}
+.demo-swipe-up {
+  animation-name: demo-swipe-up;
+}
+@keyframes demo-swipe-up {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  2% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  6.5% {
+    opacity: 1;
+    transform: translateY(-150px);
+  }
+  8%,
+  100% {
+    opacity: 0;
+    transform: translateY(-150px);
+  }
+}
+
+/* Outside the slides, so these two simply repeat with every slide, every 5 seconds. */
+.demo-badge {
+  animation: demo-badge 5s ease-out infinite;
+}
+@keyframes demo-badge {
+  0%,
+  50%,
+  64%,
+  100% {
+    scale: 1;
+  }
+  55% {
+    scale: 2;
+  }
+}
+.demo-caption {
+  opacity: 0;
+  animation: demo-caption 5s ease-out infinite;
+  animation-delay: calc(var(--at, 0s) - 5s);
+}
+@keyframes demo-caption {
+  0%,
+  33%,
+  100% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  4%,
+  28% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-feed,
+  .demo-pick,
+  .demo-sheet,
+  .demo-save,
+  .demo-save svg,
+  .demo-tap,
+  .demo-swipe-down,
+  .demo-swipe-up,
+  .demo-badge,
+  .demo-caption {
+    animation: none;
+  }
+  /* With nothing moving, the first hint stays under the phone. */
+  .demo-caption:first-child {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in,
   .animate-rise {
