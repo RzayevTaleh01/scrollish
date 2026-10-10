@@ -1,0 +1,182 @@
+@import "tailwindcss";
+
+/* Flat design system: solid colors only, no gradients. Change the brand color in one place here. */
+:root {
+  --bg: #0f0f0f;
+  --surface: #181818;
+  --surface-2: #272727;
+  --surface-3: #3a3a3a;
+  --line: #303030;
+  --text: #f1f1f1;
+  --muted: #aaaaaa;
+  /* The brand color: logo, selection, active states. */
+  --accent: #9d8cff;
+  --accent-ink: #0f0f0f;
+  /* Azerbaijani text is always this color, so it is never confused with the English. */
+  --translation: #ffd84d;
+
+  /*
+   * Video card, like YouTube Shorts: it starts below the header and is never cropped.
+   * It takes all the height that is left and is as wide as a 9:16 video of that height,
+   * or the full screen width on tall phones (the video then sits at the top of the card).
+   */
+  --header-h: 56px;
+  /* Phones: the video fills the whole screen and the glass header floats over it. */
+  --gap: 0px;
+  --top: 0px;
+  --card-h: calc(100dvh - var(--top) - var(--gap));
+  --card-w: 100vw;
+  /*
+   * Phones: the video fills the whole card, like the Shorts app. It keeps 9:16 and is centred,
+   * so on a screen of another shape only the edges that stick out are cut.
+   * On desktop the card is exactly 9:16, so nothing is cut there.
+   */
+  --video-w: max(var(--card-w), calc(var(--card-h) * 9 / 16));
+  --video-h: calc(var(--video-w) * 16 / 9);
+}
+
+@media (min-width: 768px) {
+  :root {
+    --card-w: min(100vw, calc(var(--card-h) * 9 / 16));
+    /* Navigation row (64px) plus the topic chips row below it (32px chips, 12px space). */
+    --header-h: 108px;
+    --gap: 16px;
+    --top: calc(var(--header-h) + env(safe-area-inset-top, 0px) + var(--gap));
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-translation: var(--translation);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* Tailwind leaves buttons with the arrow cursor: everything clickable gets the hand. */
+button:not(:disabled),
+[role="tab"],
+a[href] {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * Liquid glass. Surfaces are see-through and blur what is behind them, with a thin light
+ * rim on the upper edge. Still solid colors only: the depth comes from blur and the rim.
+ */
+
+/* On top of the video. */
+@utility glass {
+  background-color: rgb(14 14 14 / 0.58);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  border: 1px solid rgb(255 255 255 / 0.13);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.2),
+    0 6px 20px rgb(0 0 0 / 0.22);
+}
+
+/* Sheets and full-screen panels: darker, so long text stays easy to read. */
+@utility glass-strong {
+  background-color: rgb(14 14 14 / 0.8);
+  -webkit-backdrop-filter: blur(32px) saturate(170%);
+  backdrop-filter: blur(32px) saturate(170%);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
+}
+
+/* On the page background or inside a panel, where there is nothing to blur. */
+@utility glass-soft {
+  background-color: rgb(255 255 255 / 0.08);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14);
+}
+
+/* Buttons give way under the finger and spring back. */
+@utility liquid {
+  transition:
+    scale 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background-color 0.2s ease,
+    color 0.2s ease;
+
+  &:active {
+    scale: 0.92;
+  }
+}
+
+/* The selection that slides between tabs, stretching a little as it lands. */
+.liquid-slide {
+  transition:
+    transform 0.5s cubic-bezier(0.34, 1.4, 0.64, 1),
+    width 0.5s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+.animate-rise {
+  animation: rise 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-rise {
+    animation: none;
+  }
+  .liquid,
+  .liquid-slide {
+    transition: none;
+  }
+}

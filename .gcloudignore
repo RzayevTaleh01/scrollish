@@ -1,0 +1,9 @@
+# What `gcloud run deploy --source .` must NOT upload to Cloud Build.
+# Secrets live in Secret Manager, the local SQLite copy stays on this machine.
+.env*
+data/
+node_modules/
+.next/
+.git/
+.claude/
+*.tsbuildinfo
