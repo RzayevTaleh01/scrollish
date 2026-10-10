@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { LANGUAGES, type LanguageId } from "@/lib/languages";
 import { TOPICS } from "@/lib/topics";
 import { LEVELS, type FeedItem, type Level } from "@/lib/types";
+import { Cover } from "./Cover";
 import { LevelBadge } from "./LevelBadge";
 import { LogoMark, Wordmark } from "./Logo";
 import { OVERLAY_CARD, OVERLAY_PRIMARY_TEXT, OVERLAY_SECONDARY_TEXT } from "./overlay";
@@ -14,16 +15,14 @@ interface Props {
   open: boolean;
   /** Videos already waiting behind this page: their covers fill the phone in the hero. */
   items: FeedItem[];
+  /** Leaves for the feed. A first-time visitor is asked for a language and a level on the way. */
   onStart: () => void;
   onLanguage: (language: LanguageId) => void;
 }
 
-const EYEBROW = "text-[11px] font-semibold uppercase tracking-[0.18em] text-muted";
-const HEADLINE = "font-black uppercase leading-[0.95] tracking-tight";
+export const EYEBROW = "text-[11px] font-semibold uppercase tracking-[0.18em] text-muted";
+export const HEADLINE = "font-black uppercase leading-[0.95] tracking-tight";
 const SECTION = "mx-auto w-full max-w-6xl px-5 md:px-8";
-
-/** Width of the image YouTube sends in place of a cover that does not exist. */
-const PLACEHOLDER_WIDTH = 120;
 
 interface Sheet {
   kind: string;
@@ -181,6 +180,7 @@ export function Landing({ open, items, onStart, onLanguage }: Props) {
 
   return (
     <div
+      data-landing
       className={cn(
         "fixed inset-0 z-50 overflow-y-auto scroll-smooth bg-bg transition-opacity duration-300",
         !open && "pointer-events-none opacity-0",
@@ -189,10 +189,14 @@ export function Landing({ open, items, onStart, onLanguage }: Props) {
     >
       <header className="sticky top-0 z-10 border-b border-line bg-bg pt-[env(safe-area-inset-top)]">
         <div className={cn(SECTION, "flex h-14 items-center gap-6")}>
-          <div className="flex items-center gap-2.5">
+          <button
+            onClick={(e) => e.currentTarget.closest("[data-landing]")?.scrollTo({ top: 0 })}
+            aria-label="Scrollish home"
+            className="liquid flex items-center gap-2.5 rounded-xl"
+          >
             <LogoMark size={28} />
             <Wordmark className="text-[19px]" />
-          </div>
+          </button>
           <nav className="ml-2 hidden gap-6 text-sm font-medium text-muted md:flex">
             <a href="#how" className="hover:text-white">
               How it works
@@ -504,26 +508,6 @@ function PhoneSlide({ demo, turn, item }: { demo: Demo; turn: number; item: Feed
       <Finger start={3} className="demo-swipe-down bottom-[150px] left-1/2 -ml-4" />
       <Finger start={3.75} className="demo-swipe-up left-1/2 top-[58%] -ml-4" />
     </div>
-  );
-}
-
-/**
- * The cover of a Short in its own upright shape, up to 1080x1920. Some videos do not have one:
- * YouTube then answers with a tiny grey placeholder, and the small landscape cover is used instead.
- */
-function Cover({ id }: { id: string }) {
-  const [upright, setUpright] = useState(true);
-
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={`https://i.ytimg.com/vi/${id}/${upright ? "oar2" : "hqdefault"}.jpg`}
-      alt=""
-      draggable={false}
-      onLoad={(e) => e.currentTarget.naturalWidth <= PLACEHOLDER_WIDTH && setUpright(false)}
-      onError={() => setUpright(false)}
-      className="absolute inset-0 size-full object-cover"
-    />
   );
 }
 

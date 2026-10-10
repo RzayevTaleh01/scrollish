@@ -1,7 +1,9 @@
+import { redirect } from "next/navigation";
 import { Feed } from "@/components/Feed";
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ v?: string }> }) {
-  // A link to a video opens straight on that video, behind the short splash. Everyone else gets the home page.
+  // Links to a video used to look like /?v=<id>. They still work, at the address videos have now.
   const { v } = await searchParams;
-  return <Feed landing={!v} />;
+  if (v && /^[\w-]{11}$/.test(v)) redirect(`/shorts/${v}`);
+  return <Feed landing />;
 }

@@ -15,6 +15,16 @@ export const CHANNELS: Channel[] = [
   { id: "UCvn_XCl_mgQmt3sD753zdJA", name: "Rachel's English", lang: "en", topics: ["language"] },
   { id: "UCz4tgANd4yy8Oe0iXCdSWfA", name: "English with Lucy", lang: "en", topics: ["language"] },
   { id: "UCBHtnQGUChkwG1eyWL5EA9g", name: "ETJ English", lang: "en", topics: ["language"] },
+  // Slow, simple English for the beginner levels: lessons made for learners and children's shows.
+  { id: "UCmW5tmKIBrryNf5n-_A6Fmw", name: "Bob's Short English Lessons", lang: "en", topics: ["language"] },
+  { id: "UCZJJTxA36ZPNTJ1WFIByaeA", name: "Learn English with Bob the Canadian", lang: "en", topics: ["language"] },
+  { id: "UCVBErcpqaokOf4fI5j73K_w", name: "English with Emma", lang: "en", topics: ["language"] },
+  { id: "UCeTVoczn9NOZA9blls3YgUg", name: "EnglishClass101", lang: "en", topics: ["language"] },
+  { id: "UCvgLaFuTGGRXl0eyvBRCifA", name: "Easy English", lang: "en", topics: ["language"] },
+  { id: "UCGwA4GjY4nGMIYvaJiA0EGA", name: "English Singsing", lang: "en", topics: ["language"] },
+  { id: "UCoookXUzPciGrEZEXmh4Jjg", name: "Sesame Street", lang: "en", topics: ["language"] },
+  { id: "UCAOtE1V7Ots4DjM8JLlrYgg", name: "Peppa Pig", lang: "en", topics: ["language"] },
+  { id: "UCVzLLZkDuFGAE2BGdBuBNBg", name: "Bluey", lang: "en", topics: ["language"] },
 
   { id: "UCHnyfMqiRRG1u-2MsSQLbXA", name: "Veritasium", lang: "en", topics: ["science"] },
   { id: "UCY1kMZp36IQSyNx_9h4mpCg", name: "Mark Rober", lang: "en", topics: ["science", "tech"] },
@@ -55,6 +65,12 @@ export const CHANNELS: Channel[] = [
   // Slovak. Most of these rely on YouTube's automatic Slovak captions.
   { id: "UCpq-FGJCkoKyk0P80tzLDOQ", name: "Joyful Slovak", lang: "sk", topics: ["language"] },
   { id: "UCGMtCzls8WhmFQl16-jmDYg", name: "Linguarte", lang: "sk", topics: ["language"] },
+  // Simple Slovak for the beginner levels: lessons, children's shows and fairy tales.
+  { id: "UC4cEUJc9CP3vL87bdRUsPxQ", name: "Slovak Girl", lang: "sk", topics: ["language"] },
+  { id: "UCUPgmAhUy6NkMxzRTmks55w", name: "Learn Slovak with Stories", lang: "sk", topics: ["language"] },
+  { id: "UC2QySOE0ohZFd-1XsXzNHPw", name: "Fíha tralala", lang: "sk", topics: ["language"] },
+  { id: "UCia0mF-pM9xo5ZMN8DoFp_Q", name: "Smejko a Tanculienka", lang: "sk", topics: ["language"] },
+  { id: "UCRPWkfQMFx06C-lssDR7S8g", name: "LUNA rozprávky", lang: "sk", topics: ["language"] },
 
   { id: "UCA0qaLDDrr3m4MUQ0L_cFzg", name: "Zmudri G", lang: "sk", topics: ["science", "world"] },
   { id: "UCtW6UE6h-Na5E5BCLBafbcQ", name: "Dejepis Inak", lang: "sk", topics: ["science"] },

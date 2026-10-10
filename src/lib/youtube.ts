@@ -24,7 +24,7 @@ interface PlaylistRes {
 interface VideosRes {
   items?: {
     id: string;
-    snippet: { title: string };
+    snippet: { title: string; channelId: string; channelTitle: string };
     contentDetails: { duration: string; caption?: string };
     status: { embeddable: boolean; privacyStatus: string };
   }[];
@@ -118,6 +118,32 @@ async function buildPool(): Promise<Short[]> {
   }
 
   return pool;
+}
+
+/** A video as YouTube describes it, before its language is known. */
+export type FoundVideo = Omit<Short, "lang" | "topics"> & {
+  /** Public and allowed to play inside other sites. */
+  playable: boolean;
+};
+
+/** One video by its id, for a link to a video that is not in the pool. Null when YouTube does not know it. */
+export async function fetchVideo(id: string): Promise<FoundVideo | null> {
+  const res = await yt<VideosRes>("videos", { part: "snippet,contentDetails,status", id });
+  const video = res.items?.[0];
+  if (!video) return null;
+
+  const channel = await yt<ChannelsRes>("channels", { part: "snippet", id: video.snippet.channelId });
+  const thumbnails = channel.items?.[0]?.snippet.thumbnails;
+  return {
+    id,
+    title: video.snippet.title,
+    channelId: video.snippet.channelId,
+    channelTitle: video.snippet.channelTitle,
+    avatar: (thumbnails?.medium ?? thumbnails?.default)?.url ?? "",
+    duration: toSeconds(video.contentDetails.duration),
+    captions: video.contentDetails.caption === "true",
+    playable: video.status.embeddable && video.status.privacyStatus === "public",
+  };
 }
 
 // The cache key carries the channel count, so adding channels rebuilds the pool right away.

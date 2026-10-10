@@ -42,7 +42,7 @@ export function Transcript({ segments, level, current, showTranslation, selectio
 
   return (
     <aside
-      className="glass-soft relative hidden w-[420px] lg:ml-auto shrink-0 flex-col overflow-hidden rounded-3xl lg:flex"
+      className="glass-soft relative hidden w-[420px] shrink-0 flex-col overflow-hidden rounded-xl lg:ml-4 lg:flex"
       style={{ height: "var(--card-h)" }}
     >
       <div className="flex items-center gap-2 border-b border-white/10 px-5 py-4">
@@ -62,7 +62,7 @@ export function Transcript({ segments, level, current, showTranslation, selectio
             <div
               key={i}
               data-row={i}
-              className={cn("rounded-2xl px-3 py-2.5 transition-colors", live ? "bg-white/10" : "hover:bg-white/5")}
+              className={cn("rounded-lg px-3 py-2.5 transition-colors", live ? "bg-white/10" : "hover:bg-white/5")}
             >
               <button
                 type="button"

@@ -78,11 +78,10 @@ function fromXml(xml: string): Cue[] {
 }
 
 /**
- * Reads the captions of a video in the given language (ISO code such as "en" or "sk")
- * through YouTube's Android player endpoint.
+ * The caption tracks of a video, through YouTube's Android player endpoint.
  * This is not an official API: it can break or be rate limited at any time.
  */
-export async function fetchTranscript(videoId: string, lang: string): Promise<Transcript> {
+async function fetchTracks(videoId: string): Promise<Track[]> {
   const res = await fetch(PLAYER_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
@@ -103,13 +102,17 @@ export async function fetchTranscript(videoId: string, lang: string): Promise<Tr
   }
   if (status && status !== "OK") throw new NoTranscriptError(`video is ${status}`);
 
-  const tracks: Track[] = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
-  const matching = tracks.filter((t) => t.languageCode?.toLowerCase().startsWith(lang));
+  return data?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+}
+
+const inLanguage = (track: Track, lang: string) => track.languageCode?.toLowerCase().startsWith(lang) ?? false;
+const available = (tracks: Track[]) => tracks.map((t) => t.languageCode).join(", ") || "none";
+
+/** Downloads the captions in one language: the track made by hand when there is one, else the automatic one. */
+async function readTrack(tracks: Track[], lang: string): Promise<Transcript> {
+  const matching = tracks.filter((t) => inLanguage(t, lang));
   const track = matching.find((t) => t.kind !== "asr") ?? matching[0];
-  if (!track) {
-    const available = tracks.map((t) => t.languageCode).join(", ") || "none";
-    throw new NoTranscriptError(`no "${lang}" caption track (available: ${available})`);
-  }
+  if (!track) throw new NoTranscriptError(`no "${lang}" caption track (available: ${available(tracks)})`);
 
   const url = new URL(track.baseUrl);
   if (!url.hostname.endsWith(".youtube.com")) throw new NoTranscriptError("unexpected caption host");
@@ -132,4 +135,29 @@ export async function fetchTranscript(videoId: string, lang: string): Promise<Tr
   const cues = fromXml(await xmlRes.text());
   if (!cues.length) throw new NoTranscriptError("caption track is empty");
   return { cues, kind };
+}
+
+/** Reads the captions of a video in the given language (ISO code such as "en" or "sk"). */
+export async function fetchTranscript(videoId: string, lang: string): Promise<Transcript> {
+  return readTrack(await fetchTracks(videoId), lang);
+}
+
+/**
+ * Reads the captions of a video whose language is not known, and says which of `langs` it is in.
+ * The automatic track is always in the language that is spoken, so it decides: subtitles made by
+ * hand may be a translation. A video without an automatic track counts as the first of `langs`
+ * that has captions.
+ */
+export async function fetchSpokenTranscript(videoId: string, langs: string[]): Promise<Transcript & { lang: string }> {
+  const tracks = await fetchTracks(videoId);
+  const spoken = tracks.find((t) => t.kind === "asr");
+  const lang = (spoken ? langs.filter((l) => inLanguage(spoken, l)) : langs).find((l) =>
+    tracks.some((t) => inLanguage(t, l)),
+  );
+  if (!lang) {
+    throw new NoTranscriptError(
+      spoken ? `the video is in "${spoken.languageCode}"` : `no caption track in ${langs.join(" or ")} (available: ${available(tracks)})`,
+    );
+  }
+  return { ...(await readTrack(tracks, lang)), lang };
 }

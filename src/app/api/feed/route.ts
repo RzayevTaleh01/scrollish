@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readyVideos } from "@/lib/db";
-import { filterByLevel, sliceFeed } from "@/lib/feed";
+import { readyVideos, videoById, type ReadyVideo } from "@/lib/db";
+import { filterByLevel, levelDistance, sliceFeed } from "@/lib/feed";
 import { hasGeminiKey } from "@/lib/gemini";
-import { ingestProgress, kickIngest } from "@/lib/ingest";
+import { ingestProgress, kickIngest, requestVideo } from "@/lib/ingest";
 import { DEFAULT_LANGUAGE, isLanguageId } from "@/lib/languages";
-import { LEVELS, type FeedPending, type FeedResponse, type Level } from "@/lib/types";
+import { LEVELS, type FeedPending, type FeedRedirect, type FeedResponse, type Level } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,13 +21,30 @@ export async function GET(req: NextRequest) {
 
   try {
     const keyed = hasGeminiKey();
-    if (keyed) kickIngest(lang, topic);
+    if (keyed) kickIngest(lang, topic, level);
 
-    const everything = await readyVideos(lang, "all");
+    // Videos opened by their link belong to no topic: they can be pinned, but they are not part of the feed.
+    const everything = (await readyVideos(lang, "all")).filter((v) => v.topics.length);
     const ready = topic === "all" ? everything : everything.filter((v) => v.topics.includes(topic));
-    // A video opened through a shared link goes first, whatever the topic or level.
+
+    // A video opened by its link goes first, whatever its topic or level. It may be in another
+    // language than the viewer's, or not analysed yet: then it is prepared now, while they wait.
     const first = params.get("first");
-    const pinned = first ? everything.find((v) => v.id === first) : undefined;
+    const linked = first && /^[\w-]{11}$/.test(first) ? await videoById(first) : null;
+    let pinned: ReadyVideo | undefined;
+    let notice: string | undefined;
+    if (linked?.status === "ready") {
+      if (linked.lang === lang) pinned = linked.video;
+      else if (offset === 0) return NextResponse.json({ language: linked.lang } satisfies FeedRedirect);
+    } else if (first && offset === 0 && /^[\w-]{11}$/.test(first)) {
+      const outcome = requestVideo(first, lang, linked);
+      if (outcome.pending) {
+        const body: FeedPending = { pending: true, video: first, ready: 0, running: true, error: outcome.error };
+        return NextResponse.json(body, { status: 202 });
+      }
+      notice = outcome.reason;
+    }
+
     if (!ready.length && !pinned) {
       if (!keyed) return NextResponse.json({ error: "no_gemini_key" }, { status: 503 });
       const body: FeedPending = { pending: true, ready: 0, ...ingestProgress() };
@@ -35,10 +52,12 @@ export async function GET(req: NextRequest) {
     }
 
     const pool = filterByLevel(ready.length ? ready : everything, level).filter((v) => v.id !== pinned?.id);
-    let items = pool.length ? sliceFeed(pool, seed, offset, limit) : [];
+    // With a level chosen, each pass over the pool starts with that level and moves outwards.
+    const rank = level ? (v: (typeof pool)[number]) => levelDistance(v.level, level) : undefined;
+    let items = pool.length ? sliceFeed(pool, seed, offset, limit, rank) : [];
     if (pinned) {
       // The pinned video takes position 0, the normal feed follows shifted by one.
-      const rest = pool.length ? sliceFeed(pool, seed, Math.max(0, offset - 1), offset === 0 ? limit - 1 : limit) : [];
+      const rest = pool.length ? sliceFeed(pool, seed, Math.max(0, offset - 1), offset === 0 ? limit - 1 : limit, rank) : [];
       const shifted = rest.map((v) => ({ ...v, index: v.index + 1 }));
       items = offset === 0 ? [{ ...pinned, index: 0 }, ...shifted] : shifted;
     }
@@ -46,6 +65,7 @@ export async function GET(req: NextRequest) {
       items,
       nextOffset: offset + limit,
       total: pool.length,
+      notice,
     };
     return NextResponse.json(body, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {

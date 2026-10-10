@@ -169,6 +169,10 @@ button:disabled {
 .animate-rise {
   animation: rise 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
+/* Fades in only after a short wait: for things that should not flash when the wait is brief. */
+.animate-late {
+  animation: fade-in 0.25s ease-out 0.4s both;
+}
 
 /*
  * The phone on the home page plays one loop of 15 seconds: three slides of 5 seconds each, and a
@@ -418,6 +422,7 @@ button:disabled {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in,
+  .animate-late,
   .animate-rise {
     animation: none;
   }

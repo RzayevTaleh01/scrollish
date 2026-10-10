@@ -5,16 +5,7 @@ import { useEffect } from "react";
 import { cn } from "@/lib/cn";
 import { LANGUAGES } from "@/lib/languages";
 import { useSettings } from "@/lib/settings";
-import { LEVELS, type Level } from "@/lib/types";
-
-const LEVEL_HINT: Record<Level, string> = {
-  A1: "Beginner",
-  A2: "Elementary",
-  B1: "Intermediate",
-  B2: "Upper intermediate",
-  C1: "Advanced",
-  C2: "Proficient",
-};
+import { LEVEL_NAME, LEVELS } from "@/lib/types";
 
 export function Settings({ onClose }: { onClose: () => void }) {
   const { language, level, setLanguage, setLevel } = useSettings();
@@ -78,7 +69,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
               <LevelOption
                 key={option}
                 label={option}
-                hint={LEVEL_HINT[option]}
+                hint={LEVEL_NAME[option]}
                 selected={level === option}
                 onClick={() => setLevel(option)}
               />

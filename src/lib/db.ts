@@ -1,10 +1,17 @@
 import { Pool } from "pg";
 import type { DictEntry, FeedItem, Level, Segment, Short, VideoContent } from "./types";
 
-export type VideoStatus = "ready" | "no_captions" | "too_short" | "failed";
+/**
+ * "deferred": the captions were read and the level estimated, but the video was not analysed
+ * because the feed did not need that level at the time. `level` holds the estimate.
+ * "rejected": opened by its link, but not a video the app can show. `error` says why, in words
+ * meant for the viewer.
+ */
+export type VideoStatus = "ready" | "no_captions" | "too_short" | "failed" | "deferred" | "rejected";
 
 export interface StatusRow {
   status: VideoStatus;
+  level: Level | null;
   attempts: number;
   updatedAt: number;
 }
@@ -95,21 +102,31 @@ async function init(): Promise<Pool> {
 
 export async function videoStatuses(): Promise<Map<string, StatusRow>> {
   const db = await getDb();
-  const res = await db.query("SELECT id, status, attempts, updated_at FROM videos");
+  const res = await db.query("SELECT id, status, level, attempts, updated_at FROM videos");
   return new Map(
     res.rows.map((r) => [
       String(r.id),
-      { status: String(r.status) as VideoStatus, attempts: Number(r.attempts), updatedAt: Number(r.updated_at) },
+      {
+        status: String(r.status) as VideoStatus,
+        level: (r.level ? String(r.level) : null) as Level | null,
+        attempts: Number(r.attempts),
+        updatedAt: Number(r.updated_at),
+      },
     ]),
   );
 }
 
-export async function markVideo(short: Short, status: Exclude<VideoStatus, "ready">, error: string) {
+export async function markVideo(
+  short: Short,
+  status: Exclude<VideoStatus, "ready">,
+  error: string,
+  level: Level | null = null,
+) {
   const db = await getDb();
   await db.query(
-    `INSERT INTO videos (id, lang, title, channel_id, channel_title, avatar, topics, duration, captions, status, error, attempts, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-     ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, error = EXCLUDED.error,
+    `INSERT INTO videos (id, lang, title, channel_id, channel_title, avatar, topics, duration, captions, status, error, attempts, updated_at, level)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, error = EXCLUDED.error, level = EXCLUDED.level,
        attempts = videos.attempts + EXCLUDED.attempts, updated_at = EXCLUDED.updated_at`,
     [
       short.id,
@@ -125,6 +142,7 @@ export async function markVideo(short: Short, status: Exclude<VideoStatus, "read
       error.slice(0, 300),
       status === "failed" ? 1 : 0,
       Date.now(),
+      level,
     ],
   );
 }
@@ -262,7 +280,11 @@ export async function readyVideos(lang: string, topic: string): Promise<ReadyVid
      FROM videos WHERE status = 'ready' AND lang = $1 AND ($2 = 'all' OR topics ? $2) ORDER BY id`,
     [lang, topic],
   );
-  return res.rows.map((r) => ({
+  return res.rows.map(asVideo);
+}
+
+function asVideo(r: Record<string, unknown>): ReadyVideo {
+  return {
     id: String(r.id),
     title: String(r.title),
     channelId: String(r.channel_id),
@@ -271,17 +293,35 @@ export async function readyVideos(lang: string, topic: string): Promise<ReadyVid
     topics: r.topics as string[],
     duration: Number(r.duration),
     level: (r.level ? String(r.level) : null) as Level | null,
-  }));
+  };
 }
 
-export async function readyCountByTopic(lang: string): Promise<Record<string, number>> {
+export interface VideoRow extends StatusRow {
+  lang: string;
+  error: string | null;
+  video: ReadyVideo;
+}
+
+/** One video and where it stands, whatever its language. For a video opened by its link. */
+export async function videoById(id: string): Promise<VideoRow | null> {
   const db = await getDb();
   const res = await db.query(
-    `SELECT topic, COUNT(*) AS n FROM videos, jsonb_array_elements_text(topics) AS topic
-     WHERE status = 'ready' AND lang = $1 GROUP BY topic`,
-    [lang],
+    `SELECT id, lang, title, channel_id, channel_title, avatar, topics, duration, level, status, error, attempts, updated_at
+     FROM videos WHERE id = $1`,
+    [id],
   );
-  return Object.fromEntries(res.rows.map((r) => [String(r.topic), Number(r.n)]));
+  const r = res.rows[0];
+  if (!r) return null;
+  const video = asVideo(r);
+  return {
+    status: String(r.status) as VideoStatus,
+    level: video.level,
+    attempts: Number(r.attempts),
+    updatedAt: Number(r.updated_at),
+    lang: String(r.lang),
+    error: r.error ? String(r.error) : null,
+    video,
+  };
 }
 
 /** The analysed segments of every ready video in a language, one array per video. */

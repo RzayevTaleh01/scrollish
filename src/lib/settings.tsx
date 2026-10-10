@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { SETTINGS_KEY } from "./boot";
 import { DEFAULT_LANGUAGE, isLanguageId, type LanguageId } from "./languages";
 import { LEVELS, type Level } from "./types";
 
@@ -18,13 +19,12 @@ interface SettingsContext extends Settings {
   setLevel: (level: Level | null) => void;
 }
 
-const STORAGE_KEY = "socialearn:settings";
 const DEFAULTS: Settings = { language: DEFAULT_LANGUAGE, level: null };
 const Context = createContext<SettingsContext | null>(null);
 
 function read(): Settings {
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
     return {
       language: isLanguageId(stored.language) ? stored.language : DEFAULTS.language,
       level: LEVELS.includes(stored.level) ? stored.level : null,
@@ -47,7 +47,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => {
       const next = { ...prev, ...patch };
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
       } catch {}
       return next;
     });

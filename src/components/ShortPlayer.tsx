@@ -9,11 +9,15 @@ export interface PlayerControls {
 }
 
 interface Props {
+  /** The video to show. When it changes the same player is handed the new video, it is not rebuilt. */
   videoId: string;
   controls?: RefObject<PlayerControls | null>;
   active: boolean;
   paused: boolean;
   muted: boolean;
+  onReady: () => void;
+  /** Told when the video stops to load more, and when it moves again. */
+  onBuffering: (buffering: boolean) => void;
   onPlaying: () => void;
   onPausedChange: (paused: boolean) => void;
   onTime: (seconds: number, duration: number) => void;
@@ -36,19 +40,43 @@ function syncMute(player: YT.Player, muted: boolean, warming: boolean) {
   else player.unMute();
 }
 
-export function ShortPlayer({ videoId, controls, active, paused, muted, onPlaying, onPausedChange, onTime }: Props) {
+/** Sets a player going: on the video it already holds, or on `next` when it is handed another one. */
+function start(player: YT.Player, play: boolean, next: string | null) {
+  if (next && play) player.loadVideoById(next);
+  else if (next) player.cueVideoById(next);
+  else if (play) player.playVideo();
+}
+
+/**
+ * One YouTube player. Building one is the expensive part (a whole page of YouTube's own code), so
+ * a slide keeps its player for good and only swaps the video in it, the way the Shorts app does.
+ */
+export function ShortPlayer({
+  videoId,
+  controls,
+  active,
+  paused,
+  muted,
+  onReady,
+  onBuffering,
+  onPlaying,
+  onPausedChange,
+  onTime,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YT.Player | null>(null);
   const readyRef = useRef(false);
+  /** The video the player was last given. */
+  const heldRef = useRef(videoId);
   /**
-   * A player mounted ahead of the viewer plays silently until its first frame, then waits paused at
-   * the start. That makes YouTube buffer the clip, so it starts at once when it is swiped to.
+   * A player that is not on screen plays silently until its first frame, then waits paused at the
+   * start. That makes YouTube buffer the clip, so it starts at once when it is swiped to.
    */
   const warmingRef = useRef(false);
-  const live = useRef({ active, paused, muted, onPlaying, onPausedChange, onTime });
+  const live = useRef({ videoId, active, paused, muted, onReady, onBuffering, onPlaying, onPausedChange, onTime });
 
   useEffect(() => {
-    live.current = { active, paused, muted, onPlaying, onPausedChange, onTime };
+    live.current = { videoId, active, paused, muted, onReady, onBuffering, onPlaying, onPausedChange, onTime };
   });
 
   useEffect(() => {
@@ -60,9 +88,10 @@ export function ShortPlayer({ videoId, controls, active, paused, muted, onPlayin
 
       const target = document.createElement("div");
       host.appendChild(target);
+      heldRef.current = live.current.videoId;
 
       playerRef.current = new api.Player(target, {
-        videoId,
+        videoId: heldRef.current,
         width: "100%",
         height: "100%",
         playerVars: {
@@ -81,10 +110,14 @@ export function ShortPlayer({ videoId, controls, active, paused, muted, onPlayin
         events: {
           onReady: (e) => {
             readyRef.current = true;
+            live.current.onReady();
             if (controls) controls.current = { seek: (seconds) => e.target.seekTo(seconds, true) };
+            // The slide may have been handed another video while the player was still being built.
+            const changed = live.current.videoId !== heldRef.current;
+            heldRef.current = live.current.videoId;
             warmingRef.current = !live.current.active;
             syncMute(e.target, live.current.muted, warmingRef.current);
-            if (warmingRef.current || !live.current.paused) e.target.playVideo();
+            start(e.target, warmingRef.current || !live.current.paused, changed ? heldRef.current : null);
           },
           onStateChange: (e) => {
             if (e.data === api.PlayerState.PLAYING && warmingRef.current) {
@@ -94,12 +127,15 @@ export function ShortPlayer({ videoId, controls, active, paused, muted, onPlayin
               syncMute(e.target, live.current.muted, false);
               return;
             }
+            if (!warmingRef.current) live.current.onBuffering(e.data === api.PlayerState.BUFFERING);
             if (e.data === api.PlayerState.PLAYING) {
               // The module loads with playback, so it is unloaded here rather than on ready.
               hideYouTubeCaptions(e.target);
               live.current.onPlaying();
               live.current.onPausedChange(false);
-            } else if (e.data === api.PlayerState.PAUSED && live.current.active) {
+            } else if (e.data === api.PlayerState.PAUSED && live.current.active && !document.hidden) {
+              // Paused while the page is on screen: by the viewer, through YouTube or the system's own controls.
+              // A browser may also pause a silent video in a tab that is put away, and that is not the viewer's doing.
               live.current.onPausedChange(true);
             }
             // Shorts loop until the viewer swipes away.
@@ -120,7 +156,17 @@ export function ShortPlayer({ videoId, controls, active, paused, muted, onPlayin
       playerRef.current?.destroy();
       playerRef.current = null;
     };
-  }, [videoId, controls]);
+  }, [controls]);
+
+  // Handed another video: the player stays, only the clip is loaded, and it warms up like a new one.
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player || !readyRef.current || heldRef.current === videoId) return;
+    heldRef.current = videoId;
+    warmingRef.current = !live.current.active;
+    syncMute(player, live.current.muted, warmingRef.current);
+    start(player, warmingRef.current || !live.current.paused, videoId);
+  }, [videoId]);
 
   useEffect(() => {
     const player = playerRef.current;
@@ -140,6 +186,16 @@ export function ShortPlayer({ videoId, controls, active, paused, muted, onPlayin
     if (!player || !readyRef.current) return;
     syncMute(player, muted, warmingRef.current);
   }, [muted]);
+
+  // Back from another tab: whatever the browser did to the video meanwhile, it should be playing again.
+  useEffect(() => {
+    if (!active || paused) return;
+    const resume = () => {
+      if (!document.hidden && readyRef.current) playerRef.current?.playVideo();
+    };
+    document.addEventListener("visibilitychange", resume);
+    return () => document.removeEventListener("visibilitychange", resume);
+  }, [active, paused]);
 
   // Browsers refuse to start a video before the first tap on the page, even a silent one,
   // so a warm-up that did not get going is asked again until it does.

@@ -2,6 +2,15 @@ export type Level = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
 
 export const LEVELS: Level[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
 
+export const LEVEL_NAME: Record<Level, string> = {
+  A1: "Beginner",
+  A2: "Elementary",
+  B1: "Intermediate",
+  B2: "Upper intermediate",
+  C1: "Advanced",
+  C2: "Proficient",
+};
+
 export interface Short {
   id: string;
   /** Language spoken in the video, ISO code. */
@@ -30,10 +39,19 @@ export interface FeedResponse {
   items: FeedItem[];
   nextOffset: number;
   total: number;
+  /** Why the video a link asked for is not among the items, in words for the viewer. */
+  notice?: string;
+}
+
+/** The video a link asked for is in another language: the feed has to be asked for in that one. */
+export interface FeedRedirect {
+  language: string;
 }
 
 export interface FeedPending {
   pending: true;
+  /** Set when what is being prepared is one video, opened by its link. */
+  video?: string;
   ready: number;
   running: boolean;
   error: string | null;
