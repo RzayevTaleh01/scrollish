@@ -28,6 +28,8 @@ function hideYouTubeCaptions(player: YT.Player) {
   (player as YT.Player & { unloadModule?: (name: string) => void }).unloadModule?.("captions");
 }
 
+const WARM_RETRY_MS = 1000;
+
 /** A player that is warming up stays silent whatever the viewer's sound setting is. */
 function syncMute(player: YT.Player, muted: boolean, warming: boolean) {
   if (muted || warming) player.mute();
@@ -138,6 +140,19 @@ export function ShortPlayer({ videoId, controls, active, paused, muted, onPlayin
     if (!player || !readyRef.current) return;
     syncMute(player, muted, warmingRef.current);
   }, [muted]);
+
+  // Browsers refuse to start a video before the first tap on the page, even a silent one,
+  // so a warm-up that did not get going is asked again until it does.
+  useEffect(() => {
+    if (active) return;
+    const timer = window.setInterval(() => {
+      const player = playerRef.current;
+      if (!player || !readyRef.current || !warmingRef.current) return;
+      const state = player.getPlayerState();
+      if (state === YT.PlayerState.UNSTARTED || state === YT.PlayerState.CUED) player.playVideo();
+    }, WARM_RETRY_MS);
+    return () => window.clearInterval(timer);
+  }, [active, videoId]);
 
   useEffect(() => {
     if (!active) return;
