@@ -1,21 +1,27 @@
 "use client";
 
-import { ChevronDown, ChevronUp, KeyRound, Loader2, RotateCw } from "lucide-react";
+import { ChevronDown, ChevronUp, KeyRound, RotateCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { topicsForLanguage } from "@/lib/channels";
 import { earlySeed, FEED_PAGE_SIZE, linkedVideo, takeEarlyFeed, videoPath } from "@/lib/boot";
 import { cn } from "@/lib/cn";
 import { isLanguageId } from "@/lib/languages";
 import { likedFrom, readLiked, writeLiked, type LikedVideo } from "@/lib/liked";
-import { SavedProvider, useSaved } from "@/lib/saved";
+import { isLeanDevice } from "@/lib/media";
+import { SavedProvider } from "@/lib/saved";
 import { SettingsProvider, useSettings } from "@/lib/settings";
 import type { FeedItem, FeedPending, FeedRedirect, FeedResponse, Level } from "@/lib/types";
 import { loadYouTubeApi } from "@/lib/youtube-iframe";
-import { Dictionary } from "./Dictionary";
+import { AddVideo } from "./AddVideo";
+import { BottomNav, type Panel } from "./BottomNav";
+import { preloadCover } from "./Cover";
 import { Landing } from "./Landing";
-import { Liked } from "./Liked";
+import { Library } from "./Library";
 import { Onboarding } from "./Onboarding";
+import { CardFrame, Preparing } from "./Preparing";
+import { FeedSkeleton } from "./Skeleton";
 import { Settings } from "./Settings";
+import { SPEED_MAX, SPEED_MIN, tidySpeed } from "./SpeedSheet";
 import { ShortSlide } from "./ShortSlide";
 import { TopBar } from "./TopBar";
 
@@ -29,6 +35,8 @@ interface FeedQuery {
 }
 
 const PREFETCH_AHEAD = 4;
+/** Covers fetched ahead of the video on screen, so a swipe always lands on a picture. They are small. */
+const COVERS_AHEAD = 4;
 /** Videos kept loaded and buffered around the one on screen, so a swipe either way starts at once. */
 const PLAYERS_AHEAD = 2;
 const PLAYERS_BEHIND = 1;
@@ -38,17 +46,19 @@ const PLAYERS_BEHIND = 1;
  * and handed the next video. Building a player is the slow part, loading a clip into one is quick.
  */
 const SLIDES = PLAYERS_BEHIND + 1 + PLAYERS_AHEAD;
+/** On a phone: the video on screen, the next one ready to go, and the last one for a swipe back. */
+const LEAN_SLIDES = 3;
 /**
  * The other players wait until the video on screen is under way, so they do not compete with it
  * for the network and the processor. A video that never gets going holds them back this long at most.
  */
-const HOLD_MAX_MS = 2500;
+const HOLD_MAX_MS = 1000;
 /** The first time round, the players further from the video on screen are built this much later each. */
 const BUILD_STAGGER_MS = 700;
 const POLL_MS = 3000;
-const HEADER_HIDE_MS = 3000;
 const TOAST_MS = 2600;
 const TRANSLATION_KEY = "socialearn:translation";
+const SPEED_KEY = "socialearn:speed";
 /** Set once the viewer has been asked which language and level they want. */
 const ASKED_KEY = "socialearn:asked";
 
@@ -64,10 +74,12 @@ export function Feed({ landing = false }: { landing?: boolean }) {
 }
 
 function FeedScreen({ landing }: { landing: boolean }) {
-  const saved = useSaved();
   const settings = useSettings();
   const [selectedTopic, setTopic] = useState("all");
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Library or Profile, over the feed. Only one at a time: on phones they are tabs. */
+  const [panel, setPanel] = useState<Panel | null>(null);
+  /** The plus button's question: which YouTube video to add. */
+  const [adding, setAdding] = useState(false);
   const [items, setItems] = useState<FeedItem[]>([]);
   const [active, setActive] = useState(0);
   const [status, setStatus] = useState<Status>("loading");
@@ -83,16 +95,14 @@ function FeedScreen({ landing }: { landing: boolean }) {
    * let a page play video silently. The first tap or key press anywhere turns the sound on.
    */
   const [soundLocked, setSoundLocked] = useState(!landing);
-  const [dictionaryOpen, setDictionaryOpen] = useState(false);
-  const [likedOpen, setLikedOpen] = useState(false);
+  /** A phone or a weak device: fewer players at a time, and none ahead of the first until the viewer starts. */
+  const [lean, setLean] = useState(false);
   const [muted, setMuted] = useState(false);
   const [translation, setTranslation] = useState(true);
+  const [speed, setSpeed] = useState(1);
   const [liked, setLiked] = useState<LikedVideo[]>([]);
   const likedIds = useMemo(() => new Set(liked.map((v) => v.id)), [liked]);
   const [toast, setToast] = useState<string | null>(null);
-  /** Whether the video on screen is playing, and whether the phone header has been tucked away for it. */
-  const [playing, setPlaying] = useState(false);
-  const [headerAway, setHeaderAway] = useState(false);
   /** The slide whose video is under way (see `onSettled` of the slide), or -1. */
   const [settledAt, setSettledAt] = useState(-1);
 
@@ -117,19 +127,7 @@ function FeedScreen({ landing }: { landing: boolean }) {
     () => ({ topic, lang: settings.language, level: settings.level }),
     [topic, settings.language, settings.level],
   );
-  const overlayOpen = dictionaryOpen || settingsOpen || likedOpen;
-
-  // Phones, like the play button: while a video plays the header leaves after a moment,
-  // and it comes back as soon as the video stops.
-  useEffect(() => {
-    if (!playing) {
-      setHeaderAway(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setHeaderAway(true), HEADER_HIDE_MS);
-    return () => window.clearTimeout(timer);
-  }, [playing]);
-  const headerHidden = headerAway && playing && started && status === "ready" && !overlayOpen;
+  const overlayOpen = panel !== null || adding;
 
   const flash = useCallback((message: string) => {
     setToast(message);
@@ -225,8 +223,11 @@ function FeedScreen({ landing }: { landing: boolean }) {
     const shared = linkedVideo();
     if (shared) sharedRef.current = { id: shared, lang: null, shownFor: null };
     setLiked(readLiked());
+    setLean(isLeanDevice());
     try {
       setTranslation(localStorage.getItem(TRANSLATION_KEY) !== "0");
+      const savedSpeed = Number(localStorage.getItem(SPEED_KEY));
+      if (savedSpeed >= SPEED_MIN && savedSpeed <= SPEED_MAX) setSpeed(tidySpeed(savedSpeed));
       setAsked(localStorage.getItem(ASKED_KEY) === "1");
     } catch {}
   }, []);
@@ -275,6 +276,10 @@ function FeedScreen({ landing }: { landing: boolean }) {
     const timer = window.setTimeout(() => load(query, "poll"), POLL_MS);
     return () => window.clearTimeout(timer);
   }, [status, pending, query, load]);
+
+  useEffect(() => {
+    for (const item of items.slice(active + 1, active + 1 + COVERS_AHEAD)) preloadCover(item.id);
+  }, [active, items]);
 
   // Endless loop: keep the queue filled a few clips ahead of the viewer.
   useEffect(() => {
@@ -354,20 +359,37 @@ function FeedScreen({ landing }: { landing: boolean }) {
     });
   }, []);
 
-  /** Opens a liked video at the top of the feed, in its own language. */
-  const openLiked = useCallback(
-    (video: LikedVideo) => {
-      setLikedOpen(false);
-      if (isLanguageId(video.lang) && video.lang !== settings.language) {
-        sharedRef.current = { id: video.id, lang: video.lang, shownFor: null };
-        settings.setLanguage(video.lang);
+  /**
+   * Opens a video at the top of the feed: one from the liked list, in its own language, or one added
+   * by its link, whose language the feed finds out (it switches to it when it is another one).
+   */
+  const openVideo = useCallback(
+    (id: string, lang: string | null = null) => {
+      setPanel(null);
+      setAdding(false);
+      if (isLanguageId(lang) && lang !== settings.language) {
+        sharedRef.current = { id, lang, shownFor: null };
+        settings.setLanguage(lang);
         return;
       }
-      sharedRef.current = { id: video.id, lang: null, shownFor: query };
+      sharedRef.current = { id, lang: null, shownFor: query };
       load(query, "reset");
     },
     [settings, query, load],
   );
+
+  const changeSpeed = useCallback((next: number) => {
+    setSpeed(next);
+    try {
+      localStorage.setItem(SPEED_KEY, String(next));
+    } catch {}
+  }, []);
+
+  /** Gives up waiting for the video a link asked for, and shows the ordinary feed. */
+  const skipLinked = useCallback(() => {
+    sharedRef.current = null;
+    load(query, "reset");
+  }, [query, load]);
 
   const toggleTranslation = useCallback(() => {
     setTranslation((on) => {
@@ -386,6 +408,9 @@ function FeedScreen({ landing }: { landing: boolean }) {
   }, []);
 
   // With the sound still locked the tap has already unlocked it: muting again would undo that.
+  /** A browser refused to play a video with sound: everything goes silent until the next tap, as on arrival. */
+  const blockSound = useCallback(() => setSoundLocked(true), []);
+
   const toggleMute = useCallback(() => {
     if (!soundLocked) setMuted((m) => !m);
   }, [soundLocked]);
@@ -421,7 +446,8 @@ function FeedScreen({ landing }: { landing: boolean }) {
   );
 
   // The first position that has a slide: one behind the video on screen, short of the ends of the list.
-  const firstSlide = Math.max(0, Math.min(active - PLAYERS_BEHIND, items.length - SLIDES));
+  const slideCount = lean ? LEAN_SLIDES : SLIDES;
+  const firstSlide = Math.max(0, Math.min(active - PLAYERS_BEHIND, items.length - slideCount));
 
   return (
     <main className="fixed inset-0 overflow-hidden bg-bg">
@@ -429,25 +455,23 @@ function FeedScreen({ landing }: { landing: boolean }) {
         language={settings.language}
         topic={topic}
         onTopic={setTopic}
-        savedCount={saved.items.filter((i) => i.lang === settings.language).length}
-        hidden={headerHidden}
         onHome={goHome}
-        onOpenLiked={() => setLikedOpen(true)}
-        onOpenDictionary={() => setDictionaryOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenLibrary={() => setPanel("library")}
+        onOpenProfile={() => setPanel("profile")}
+        onAdd={() => setAdding(true)}
       />
 
       {status === "ready" && (
         <div
           ref={scrollerRef}
-          className="no-scrollbar absolute inset-0 snap-y snap-mandatory overflow-y-scroll overscroll-contain scroll-smooth"
+          className="animate-fade-in no-scrollbar absolute inset-0 snap-y snap-mandatory overflow-y-scroll overscroll-contain scroll-smooth"
         >
           {/*
             The slides cover the positions around the video on screen. They are listed by slide, not by
             position, so a slide never changes place in the page: moving it there would reload its player.
           */}
-          {Array.from({ length: Math.min(SLIDES, items.length) }, (_, slide) => {
-            const position = firstSlide + ((((slide - firstSlide) % SLIDES) + SLIDES) % SLIDES);
+          {Array.from({ length: Math.min(slideCount, items.length) }, (_, slide) => {
+            const position = firstSlide + ((((slide - firstSlide) % slideCount) + slideCount) % slideCount);
             const item = items[position];
             return (
               <ShortSlide
@@ -455,38 +479,29 @@ function FeedScreen({ landing }: { landing: boolean }) {
                 item={item}
                 position={position}
                 active={started && !overlayOpen && position === active}
-                hold={position !== active && settledAt !== active}
+                hold={position !== active && (settledAt !== active || (lean && !started))}
                 current={position === active}
                 buildDelay={Math.max(0, Math.abs(position - active) - 1) * BUILD_STAGGER_MS}
                 muted={muted || soundLocked}
                 soundLocked={soundLocked}
+                speed={speed}
                 translation={translation}
                 liked={likedIds.has(item.id)}
                 onLike={toggleLike}
                 onTranslation={toggleTranslation}
                 onMute={toggleMute}
+                onSpeed={changeSpeed}
                 onShare={share}
-                onPlayback={setPlaying}
                 onSettled={setSettledAt}
+                onSoundBlocked={blockSound}
               />
             );
           })}
         </div>
       )}
 
-      {/*
-        Phones: YouTube draws its own title, logo and menu along the top of the video. This blurred band
-        always covers them, with the header floating over it when it is shown. Taps pass through to the video.
-      */}
-      {status === "ready" && (
-        <div
-          aria-hidden
-          className="pointer-events-none fixed inset-x-0 top-0 z-20 h-[calc(env(safe-area-inset-top)+64px)] backdrop-blur-xl backdrop-saturate-150 md:hidden"
-        />
-      )}
-
-      {status === "loading" && <Skeleton />}
-      {status === "preparing" && <Preparing pending={pending} />}
+      {status === "loading" && <FeedSkeleton />}
+      {status === "preparing" && <Preparing pending={pending} onSkip={skipLinked} />}
       {status === "nokey" && <MissingKey />}
       {status === "empty" && (
         <Message title="No videos in this topic yet" action="Show all topics" onAction={() => setTopic("all")} />
@@ -508,20 +523,26 @@ function FeedScreen({ landing }: { landing: boolean }) {
 
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-0 bottom-8 z-50 flex justify-center transition duration-300",
+          "pointer-events-none absolute inset-x-0 bottom-[calc(var(--nav-h)+var(--nav-lift)+var(--seek-h)+1.5rem)] z-50 flex justify-center transition duration-300",
           toast ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
         )}
       >
         <span className="rounded-full bg-white px-4 py-2 text-[13px] font-semibold text-black">{toast}</span>
       </div>
 
-      {dictionaryOpen && <Dictionary onClose={() => setDictionaryOpen(false)} />}
-      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
-      {likedOpen && (
-        <Liked items={liked} onOpen={openLiked} onRemove={removeLike} onClose={() => setLikedOpen(false)} />
-      )}
+      {/* Always rendered: each one fades itself in and out as it opens and closes. */}
+      <Library
+        open={panel === "library"}
+        liked={liked}
+        onOpenVideo={(video) => openVideo(video.id, video.lang)}
+        onRemoveLike={removeLike}
+        onClose={() => setPanel(null)}
+      />
+      <Settings open={panel === "profile"} likedCount={liked.length} onClose={() => setPanel(null)} />
+      <AddVideo open={adding} onOpen={openVideo} onClose={() => setAdding(false)} />
+      <BottomNav panel={panel} onHome={goHome} onSelect={setPanel} onAdd={() => setAdding(true)} />
       {home && <Landing open={!started} items={items} onStart={begin} onLanguage={settings.setLanguage} />}
-      {asking && <Onboarding onBack={() => setAsking(false)} onDone={finishAsking} />}
+      <Onboarding open={asking} onBack={() => setAsking(false)} onDone={finishAsking} />
     </main>
   );
 }
@@ -551,43 +572,6 @@ function NavButton({
   );
 }
 
-function CardFrame({ children, pulse }: { children?: React.ReactNode; pulse?: boolean }) {
-  return (
-    <div className="absolute inset-0 z-10 flex items-start justify-center pt-[var(--top)]">
-      <div
-        className={cn(
-          "relative flex flex-col items-center justify-center gap-3 bg-surface px-8 text-center md:rounded-3xl",
-          pulse && "animate-pulse",
-        )}
-        style={{ width: "var(--card-w)", height: "var(--card-h)" }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Skeleton() {
-  return <CardFrame pulse />;
-}
-
-function Preparing({ pending }: { pending: FeedPending | null }) {
-  return (
-    <CardFrame>
-      <Loader2 size={30} className="animate-spin text-accent" />
-      <p className="text-lg font-semibold">{pending?.video ? "Preparing this video" : "Preparing your videos"}</p>
-      <p className="max-w-[260px] text-sm leading-relaxed text-muted">
-        {pending?.video
-          ? "Nobody has opened this video here before. Its subtitles are being read and translated, once. That takes about a minute, and after that it opens instantly for everyone."
-          : "Subtitles are being fetched and translated once with Gemini, a few videos per request. The first videos take about a minute, after that they open instantly."}
-      </p>
-      {pending?.error && (
-        <p className="max-w-[280px] rounded-lg bg-surface-2 px-3 py-2 text-xs text-rose-300">{pending.error}</p>
-      )}
-    </CardFrame>
-  );
-}
-
 function MissingKey() {
   return (
     <CardFrame>
@@ -604,7 +588,7 @@ function MissingKey() {
 
 function Message({ title, action, onAction }: { title: string; action: string; onAction: () => void }) {
   return (
-    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 px-8 text-center">
+    <div className="animate-fade-in absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 px-8 text-center">
       <p className="text-lg font-semibold">{title}</p>
       <button
         onClick={onAction}

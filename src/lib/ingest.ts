@@ -9,11 +9,18 @@ import {
   type VideoRow,
   type VideoStatus,
 } from "./db";
-import { analyzeVideos, GeminiError, hasGeminiKey } from "./gemini";
+import { analyzeVideos, GeminiError, hasGeminiKey, transcribeVideo, type SpokenLine } from "./gemini";
 import { knownWords, wordForms } from "./known";
 import { isLanguageId, LANGUAGES, languageOf, type LanguageId } from "./languages";
 import { buildRawSegments, videoLevel, type RawSegment } from "./segments";
-import { NoTranscriptError, TranscriptBlockedError, fetchSpokenTranscript, fetchTranscript } from "./transcript";
+import {
+  NoCaptionsError,
+  NoTranscriptError,
+  TranscriptBlockedError,
+  fetchSpokenTranscript,
+  fetchTranscript,
+  type Transcript,
+} from "./transcript";
 import { LEVELS, type Level, type Segment, type Short } from "./types";
 import { fetchVideo, getPool } from "./youtube";
 
@@ -308,14 +315,17 @@ async function analysePack(pack: Prepared[], lang: LanguageId) {
       await markVideo(short, "failed", "Gemini answer for this video was incomplete");
       continue;
     }
-    const segments: Segment[] = raw.map((segment, i) => ({
-      start: segment.start,
-      end: segment.end,
-      tokens: segment.tokens,
-      tr: result[i].tr,
-      words: result[i].words,
-      phrases: result[i].phrases,
-    }));
+    // Words and phrases met before take the level they already have, so it is the same in every video.
+    const segments: Segment[] = known.settle(
+      raw.map((segment, i) => ({
+        start: segment.start,
+        end: segment.end,
+        tokens: segment.tokens,
+        tr: result[i].tr,
+        words: result[i].words,
+        phrases: result[i].phrases,
+      })),
+    );
     const level = videoLevel(segments);
     await saveReadyVideo(short, kind, level, segments, model);
     if (estimate) console.log(`[ingest] ${short.id} guessed ${estimate}, is ${level}`);
@@ -421,6 +431,33 @@ export function requestVideo(id: string, preferred: LanguageId, row: VideoRow | 
   return { pending: true, error: null };
 }
 
+/** Nobody speaks faster than this for a whole line. */
+const MAX_WORDS_PER_SECOND = 6;
+
+/**
+ * Counts the signs that a transcript made by Gemini went wrong: lines too dense to have been
+ * spoken (text that was on screen got mixed in, or the times are off), and speech that stops
+ * well before the video does (the end was left out). A video that ends on music also shows the
+ * second sign, so this only decides whether another attempt is worth it, never that a video is bad.
+ */
+function flaws(cues: SpokenLine[], duration: number): number {
+  const rushed = cues.filter((c) => c.text.split(/\s+/).length / Math.max(0.1, c.end - c.start) > MAX_WORDS_PER_SECOND);
+  const last = cues[cues.length - 1];
+  const cutShort = !last || (duration > 0 && last.start < duration * 0.8);
+  return rushed.length + (cutShort ? 1 : 0);
+}
+
+/**
+ * Lines that start after the video has ended cannot be right. When a transcript made by Gemini
+ * runs past the end, its clock ran at the wrong speed, and every time is scaled back to fit.
+ */
+function fitToLength<T extends { start: number; end: number }>(cues: T[], duration: number): T[] {
+  const last = cues[cues.length - 1];
+  if (!last || duration <= 0 || last.start < duration) return cues;
+  const scale = duration / last.end;
+  return cues.map((cue) => ({ ...cue, start: cue.start * scale, end: cue.end * scale }));
+}
+
 /**
  * Looks the video up on YouTube, reads its captions (which also tell its language) and analyses it.
  * A video that can never be shown is recorded as such. Trouble that is not the video's fault is
@@ -445,16 +482,31 @@ async function prepareRequested(id: string, preferred: LanguageId) {
     return markVideo(short, "rejected", "Only videos of up to 3 minutes can be opened here");
   }
 
-  let transcript;
+  const languages = [preferred, ...LANGUAGES.map((l) => l.id as string).filter((l) => l !== preferred)];
+  let transcript: Transcript & { lang: string };
   try {
-    const others = LANGUAGES.map((l) => l.id as string).filter((l) => l !== preferred);
-    transcript = await fetchSpokenTranscript(id, [preferred, ...others]);
+    transcript = await fetchSpokenTranscript(id, languages);
   } catch (err) {
-    if (err instanceof TranscriptBlockedError) throw err;
-    const message = err instanceof Error ? err.message : String(err);
-    return markVideo(short, err instanceof NoTranscriptError ? "no_captions" : "failed", message);
+    // YouTube will not give this server the captions (it refuses data centres), or the video has none.
+    // Gemini is then asked to watch the video and write down what is said. That costs a request more.
+    if (!(err instanceof TranscriptBlockedError) && !(err instanceof NoCaptionsError)) {
+      const message = err instanceof Error ? err.message : String(err);
+      return markVideo(short, err instanceof NoTranscriptError ? "no_captions" : "failed", message);
+    }
+    try {
+      let heard = await transcribeVideo(id, languages);
+      if (isLanguageId(heard.lang) && flaws(heard.cues, found.duration) > 0) {
+        // It does not always come out right. One more go, and the cleaner of the two is kept.
+        const again = await transcribeVideo(id, languages).catch(() => null);
+        if (again && flaws(again.cues, found.duration) < flaws(heard.cues, found.duration)) heard = again;
+      }
+      transcript = { cues: fitToLength(heard.cues, found.duration), kind: "auto", lang: heard.lang };
+    } catch (failure) {
+      if (failure instanceof GeminiError) throw failure;
+      return markVideo(short, "failed", failure instanceof Error ? failure.message : String(failure));
+    }
   }
-  if (!isLanguageId(transcript.lang)) return markVideo(short, "no_captions", `captions are in "${transcript.lang}"`);
+  if (!isLanguageId(transcript.lang)) return markVideo(short, "no_captions", `the video is in "${transcript.lang}"`);
   short.lang = transcript.lang;
 
   const raw = buildRawSegments(transcript.cues, short.lang);

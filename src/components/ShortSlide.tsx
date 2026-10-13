@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Play, VolumeX } from "lucide-react";
+import { Heart, Play, VolumeX } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { useVideoContent } from "@/lib/content";
@@ -10,8 +10,10 @@ import type { Selection } from "@/lib/units";
 import { Actions } from "./Actions";
 import { Cover } from "./Cover";
 import { LevelBadge } from "./LevelBadge";
-import { OVERLAY_CARD, OVERLAY_PRIMARY_TEXT, OVERLAY_SECONDARY_TEXT } from "./overlay";
+import { OVERLAY_CARD, OVERLAY_PRIMARY_TEXT } from "./overlay";
+import { PlayerBar, type ScrubberHandle } from "./Scrubber";
 import { ShortPlayer, type PlayerControls } from "./ShortPlayer";
+import { SpeedSheet } from "./SpeedSheet";
 import { Subtitles } from "./Subtitles";
 import { Transcript } from "./Transcript";
 import { WordSheet } from "./WordSheet";
@@ -31,14 +33,17 @@ interface Props {
   muted: boolean;
   /** Nothing has been tapped yet, so the browser only lets videos play silently: the next tap is for sound. */
   soundLocked: boolean;
+  /** Playback speed the viewer chose, 1 being normal. */
+  speed: number;
   translation: boolean;
   liked: boolean;
   onLike: (item: FeedItem) => void;
   onTranslation: () => void;
   onMute: () => void;
+  onSpeed: (speed: number) => void;
   onShare: (item: FeedItem) => void;
-  /** Told whether the slide on screen is playing, so the feed can tuck its header away. */
-  onPlayback: (playing: boolean) => void;
+  /** The browser would not play the video with sound: the feed goes silent until the next tap. */
+  onSoundBlocked: () => void;
   /** Told once the video of the slide on screen is under way: the cue to load the other videos. */
   onSettled: (position: number) => void;
 }
@@ -56,6 +61,7 @@ function findSegment(segments: Segment[], time: number): number {
 
 function Avatar({ src, name }: { src: string; name: string }) {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   if (!src || failed) {
     return (
@@ -65,14 +71,21 @@ function Avatar({ src, name }: { src: string; name: string }) {
     );
   }
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      referrerPolicy="no-referrer"
-      onError={() => setFailed(true)}
-      className="size-8 shrink-0 rounded-full bg-white/20"
-    />
+    // A grey disc until the picture arrives, then the picture fades in.
+    <span className={cn("relative size-8 shrink-0 overflow-hidden rounded-full", !loaded && "skeleton")}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        ref={(img) => {
+          if (img?.complete && img.naturalWidth && !loaded) setLoaded(true);
+        }}
+        src={src}
+        alt=""
+        referrerPolicy="no-referrer"
+        onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
+        className={cn("size-full transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")}
+      />
+    </span>
   );
 }
 
@@ -85,19 +98,23 @@ export const ShortSlide = memo(function ShortSlide({
   buildDelay,
   muted,
   soundLocked,
+  speed,
   translation,
   liked,
   onLike,
   onTranslation,
   onMute,
+  onSpeed,
   onShare,
-  onPlayback,
+  onSoundBlocked,
   onSettled,
 }: Props) {
   const content = useVideoContent(item.id);
   const contentRef = useRef(content);
   const resumeRef = useRef(false);
   const controls = useRef<PlayerControls | null>(null);
+  const progressBar = useRef<HTMLDivElement>(null);
+  const scrubber = useRef<ScrubberHandle | null>(null);
   /** Wide screens show the transcript beside the video instead of subtitles on it. */
   const wide = useMediaQuery(WIDE_QUERY);
 
@@ -108,22 +125,26 @@ export const ShortSlide = memo(function ShortSlide({
   const [built, setBuilt] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [playing, setPlaying] = useState(false);
-  /** The video has stopped to load more. */
-  const [buffering, setBuffering] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [segmentIndex, setSegmentIndex] = useState(-1);
   const [selection, setSelection] = useState<Selection | null>(null);
+  /** A big heart is on its way up over the video, because it has just been liked. */
+  const [hearted, setHearted] = useState(false);
+  const [speedOpen, setSpeedOpen] = useState(false);
+  /** The transcript line being played again on its own, or -1, and the second at which it ends. */
+  const [replaying, setReplaying] = useState(-1);
+  const stopAt = useRef<number | null>(null);
 
   // Handed another video: everything that belonged to the previous one is dropped. The player stays.
   if (shownId !== item.id) {
     setShownId(item.id);
     setPlaying(false);
-    setBuffering(false);
     setPaused(false);
-    setProgress(0);
     setSegmentIndex(-1);
     setSelection(null);
+    setHearted(false);
+    setSpeedOpen(false);
+    setReplaying(-1);
   }
   // Done while rendering, so the player never plays the previous video as if it were this one.
   if (!hold && loadedId !== item.id) setLoadedId(item.id);
@@ -140,10 +161,11 @@ export const ShortSlide = memo(function ShortSlide({
     contentRef.current = content;
   }, [content]);
 
-  const isPlaying = active && loaded && playing && !paused;
   useEffect(() => {
-    if (active) onPlayback(isPlaying);
-  }, [active, isPlaying, onPlayback]);
+    stopAt.current = null;
+  }, [item.id]);
+
+  const isPlaying = active && loaded && playing && !paused;
 
   // On screen and playing, or, before the viewer has started, on screen with its player ready.
   const settled = current && loaded && (active ? isPlaying : playerReady);
@@ -152,9 +174,17 @@ export const ShortSlide = memo(function ShortSlide({
   }, [settled, position, onSettled]);
 
   const handleTime = useCallback((time: number, duration: number) => {
-    setProgress(time / duration);
+    // Written straight to the bar: the time changes several times a second, and nothing else needs to be redrawn for it.
+    if (progressBar.current) progressBar.current.style.width = `${Math.min(time / duration, 1) * 100}%`;
+    scrubber.current?.update(time, duration);
     const segments = contentRef.current?.segments;
     setSegmentIndex(segments ? findSegment(segments, time) : -1);
+    // A line that was played again on its own has been heard to its end.
+    if (stopAt.current !== null && time >= stopAt.current) {
+      stopAt.current = null;
+      setReplaying(-1);
+      setPaused(true);
+    }
   }, []);
 
   const select = (next: Selection) => {
@@ -170,35 +200,60 @@ export const ShortSlide = memo(function ShortSlide({
     if (resumeRef.current) setPaused(false);
   };
 
+  /** Plays one line of the transcript again and stops at its end. */
+  const replay = (index: number) => {
+    const line = content?.segments[index];
+    if (!line) return;
+    stopAt.current = line.end;
+    setReplaying(index);
+    controls.current?.seek(line.start);
+    if (!selection) setPaused(false);
+  };
+
   const seek = (seconds: number) => {
+    stopAt.current = null;
+    setReplaying(-1);
     controls.current?.seek(seconds);
     if (!selection) setPaused(false);
   };
 
-  // The video on screen was asked to play and is not moving: it has not started yet, or it stalled.
-  const loading = active && !paused && !selection && (!playing || buffering);
+  /**
+   * A tap on the video does what the picture shows: a video that is not moving starts, whatever was
+   * last asked of it, and only one that is moving is paused. Asking the player itself, rather than
+   * trusting the last request, is what stops a tap from being swallowed by a pause nobody saw.
+   */
+  const togglePlayback = () => {
+    if (soundLocked || !controls.current?.isRunning()) {
+      setPaused(false);
+      controls.current?.play();
+    } else {
+      setPaused(true);
+    }
+  };
 
   const segment = content && segmentIndex >= 0 ? content.segments[segmentIndex] : null;
   const selectedSegment = content && selection ? content.segments[selection.segment] : null;
 
   const sheet = selection && selectedSegment && (
-    <>
-      <button type="button" aria-label="Close" onClick={closeSheet} className="absolute inset-0 z-30 bg-black/35" />
-      <WordSheet
-        segment={selectedSegment}
-        selection={selection}
-        videoId={item.id}
-        onSelect={setSelection}
-        onClose={closeSheet}
-      />
-    </>
+    <WordSheet
+      segment={selectedSegment}
+      selection={selection}
+      videoId={item.id}
+      onSelect={setSelection}
+      onClose={closeSheet}
+    />
   );
 
   const actions = {
     liked,
     translation,
     muted,
-    onLike: () => onLike(item),
+    speed,
+    onSpeed: () => setSpeedOpen((open) => !open),
+    onLike: () => {
+      if (!liked) setHearted(true);
+      onLike(item);
+    },
     onTranslation,
     onMute,
     onShare: () => onShare(item),
@@ -219,147 +274,163 @@ export const ShortSlide = memo(function ShortSlide({
         The right padding keeps the transcript clear of the feed's up/down buttons on narrower screens.
       */}
       <div className="mx-auto flex w-full max-w-[61rem] items-end justify-center gap-4 md:px-4 lg:pr-[max(1rem,calc(88px_-_(100vw_-_61rem)/2))]">
-        <div
-          className="relative overflow-hidden md:overflow-visible"
-          style={{ width: "var(--card-w)", height: "var(--card-h)" }}
-        >
-          {/* Ambient glow, like YouTube: the video's own colors, blurred, spilling out behind it. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={`https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`}
-            alt=""
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-0 aspect-[9/16] w-full scale-105 object-cover opacity-25 blur-3xl"
-          />
-          <div className="relative size-full">
-            {/* The 9:16 video, filling the whole card on phones. */}
-            <div
-              className="absolute overflow-hidden bg-black md:rounded-3xl"
-              style={{
-                width: "var(--video-w)",
-                height: "var(--video-h)",
-                left: "calc((var(--card-w) - var(--video-w)) / 2)",
-                top: "calc((var(--card-h) - var(--video-h)) / 2)",
-              }}
-            >
-              {built && loadedId && (
-                <ShortPlayer
-                  videoId={loadedId}
-                  controls={controls}
-                  active={active && loaded}
-                  paused={paused}
-                  muted={muted}
-                  onReady={() => setPlayerReady(true)}
-                  onBuffering={setBuffering}
-                  onPlaying={() => setPlaying(true)}
-                  onPausedChange={setPaused}
-                  onTime={handleTime}
-                />
-              )}
-              {/* The cover stays over the player until this video is really moving. */}
-              <Cover
-                key={item.id}
-                id={item.id}
-                className={cn(
-                  "pointer-events-none transition-opacity duration-300",
-                  playing && loaded ? "opacity-0" : "opacity-100",
-                )}
-              />
-            </div>
-
-            {/*
-              Phones: YouTube draws the channel, title, like and share along the bottom of the video.
-              A light blur covers them, under our own cards.
-            */}
-            <div
+        {/* Phones: the card with the player bar under it. */}
+        <div className="flex flex-col">
+          <div
+            className="relative isolate overflow-hidden rounded-[20px] md:overflow-visible md:rounded-none"
+            style={{ width: "var(--card-w)", height: "var(--card-h)" }}
+          >
+            {/* Ambient glow, like YouTube: the video's own colors, blurred, spilling out behind it. */}
+            {/* Not on phones: there the video fills the card and the glow would be worked out for nothing. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`}
+              alt=""
               aria-hidden
-              className="pointer-events-none absolute inset-x-0 bottom-0 z-[5] h-[calc(env(safe-area-inset-bottom)+48px)] backdrop-blur-md backdrop-saturate-150 md:hidden"
+              className="pointer-events-none absolute inset-x-0 top-0 hidden aspect-[9/16] w-full scale-105 object-cover opacity-25 blur-3xl md:block"
             />
-
-            <button
-              type="button"
-              aria-label={soundLocked ? "Turn the sound on" : paused ? "Play video" : "Pause video"}
-              onClick={() => (soundLocked ? setPaused(false) : setPaused((p) => !p))}
-              className="absolute inset-0 z-10"
-            />
-            {soundLocked && active && (
-              // Phones: below the header and its row of topics, which lie over the top of the video.
-              <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)+120px)] z-20 flex justify-center md:top-4">
-                <span className="animate-rise glass inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-[13px] font-semibold">
-                  <VolumeX size={16} />
-                  Tap for sound
-                </span>
-              </div>
-            )}
-            {/* Shown only when the wait is long enough to notice, so a video that starts at once never flashes it. */}
-            {loading && (
-              <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center">
-                <span className="animate-late glass grid size-[72px] place-items-center rounded-full">
-                  <Loader2 size={30} className="animate-spin" />
-                </span>
-              </div>
-            )}
-            {paused && !selection && (
-              <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center">
-                <span className="glass grid size-[72px] place-items-center rounded-full">
-                  <Play size={30} className="ml-1 fill-white" />
-                </span>
-              </div>
-            )}
-
-            {/* Right padding on phones leaves room for the action buttons. */}
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 pb-[calc(14px+env(safe-area-inset-bottom))] pl-3 pr-[72px] md:px-4 md:pb-4">
-              {segment && !wide && (
-                <Subtitles
-                  segment={segment}
-                  segmentIndex={segmentIndex}
-                  showTranslation={translation}
-                  selection={selection}
-                  onSelect={select}
+            <div className="relative size-full">
+              {/* The 9:16 video, filling the whole card on phones and reaching a little past it (--cut-top, --cut-bottom). */}
+              <div
+                className="absolute overflow-hidden bg-black md:rounded-3xl"
+                style={{
+                  width: "var(--video-w)",
+                  height: "var(--video-h)",
+                  left: "calc((var(--card-w) - var(--video-w)) / 2)",
+                  top: "calc((var(--card-h) - var(--cut-top) + var(--cut-bottom) - var(--video-h)) / 2)",
+                }}
+              >
+                {built && loadedId && (
+                  <ShortPlayer
+                    videoId={loadedId}
+                    controls={controls}
+                    active={active && loaded}
+                    paused={paused}
+                    muted={muted}
+                    speed={speed}
+                    onReady={() => setPlayerReady(true)}
+                    onPlaying={() => setPlaying(true)}
+                    onPausedChange={setPaused}
+                    onTime={handleTime}
+                    onSoundBlocked={onSoundBlocked}
+                  />
+                )}
+                {/* The cover stays over the player until this video is really moving. */}
+                <Cover
+                  key={item.id}
+                  id={item.id}
+                  className={cn(
+                    "pointer-events-none transition-opacity duration-300",
+                    playing && loaded ? "opacity-0" : "opacity-100",
+                  )}
                 />
+              </div>
+
+              <button
+                type="button"
+                aria-label={soundLocked ? "Turn the sound on" : paused ? "Play video" : "Pause video"}
+                onClick={togglePlayback}
+                className="absolute inset-0 z-10"
+              />
+              {soundLocked && active && (
+                // Below the video's info in the top left corner.
+                <div className="pointer-events-none absolute inset-x-0 top-[64px] z-20 flex justify-center md:top-[68px]">
+                  <span className="animate-rise glass-card inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-[13px] font-semibold">
+                    <VolumeX size={16} />
+                    Tap for sound
+                  </span>
+                </div>
               )}
-              <div className={cn(OVERLAY_CARD, "flex items-center gap-2.5 py-2 pl-2 pr-3.5")}>
-                <Avatar key={item.avatar} src={item.avatar} name={item.channelTitle} />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className={cn(OVERLAY_PRIMARY_TEXT, "truncate")}>{item.channelTitle}</span>
-                    {item.level && <LevelBadge level={item.level} className="shrink-0" />}
-                  </div>
-                  <p className={cn(OVERLAY_SECONDARY_TEXT, "truncate text-white/75")}>{item.title}</p>
+              {hearted && (
+                <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center">
+                  <Heart
+                    size={104}
+                    onAnimationEnd={() => setHearted(false)}
+                    className="like-heart fill-rose-500 text-rose-500"
+                  />
+                </div>
+              )}
+              {paused && !selection && (
+                <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center">
+                  <span className="glass-button grid size-[72px] place-items-center rounded-full">
+                    <Play size={30} className="ml-1 fill-white" />
+                  </span>
+                </div>
+              )}
+
+              {/* The video's channel and level, in the top left corner, out of the way of the subtitles. */}
+              <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex md:inset-x-4 md:top-4">
+                <div className={cn(OVERLAY_CARD, "flex min-w-0 items-center gap-2.5 py-1.5 pl-1.5 pr-3")}>
+                  <Avatar key={item.avatar} src={item.avatar} name={item.channelTitle} />
+                  <span className={cn(OVERLAY_PRIMARY_TEXT, "truncate")}>{item.channelTitle}</span>
+                  {item.level && <LevelBadge level={item.level} className="shrink-0" />}
                 </div>
               </div>
-            </div>
 
-            <Actions
-              {...actions}
-              className="absolute bottom-[calc(76px+env(safe-area-inset-bottom))] right-3 z-20 flex-col md:hidden"
-            />
+              {/* Right padding on phones leaves room for the action buttons. */}
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 pb-3 pl-3 pr-[68px] md:px-4 md:pb-4">
+                {segment && !wide && (
+                  <Subtitles
+                    key={segmentIndex}
+                    segment={segment}
+                    segmentIndex={segmentIndex}
+                    showTranslation={translation}
+                    selection={selection}
+                    onSelect={select}
+                  />
+                )}
+              </div>
 
-            <div className="absolute inset-x-0 bottom-0 z-30 h-[3px] bg-white/25">
-              <div
-                className="h-full bg-accent transition-[width] duration-150 ease-linear"
-                style={{ width: `${Math.min(progress, 1) * 100}%` }}
+              <Actions
+                {...actions}
+                playback={false}
+              className="absolute bottom-3 right-3 z-20 flex-col md:hidden"
               />
-            </div>
 
-            {!wide && sheet}
+              {/* Desktop: a thin bar along the bottom of the video. Phones have the seek bar under the card. */}
+              <div className="absolute inset-x-0 bottom-0 z-30 h-[3px] bg-white/25 max-md:hidden">
+                <div
+                  key={item.id}
+                  ref={progressBar}
+                  className="h-full w-0 bg-accent transition-[width] duration-150 ease-linear"
+                />
+              </div>
+
+              {!wide && sheet}
+              <SpeedSheet open={speedOpen} speed={speed} onChange={onSpeed} onClose={() => setSpeedOpen(false)} />
+            </div>
           </div>
+          <PlayerBar
+            key={item.id}
+            handle={scrubber}
+            onSeek={seek}
+            muted={muted}
+            speed={speed}
+            onMute={onMute}
+            onSpeed={actions.onSpeed}
+            className="md:hidden"
+          />
         </div>
 
         <Actions {...actions} className="hidden flex-col md:flex" />
 
-        <Transcript
-          key={item.id}
-          segments={content?.segments ?? null}
-          level={content?.level ?? item.level}
-          current={segmentIndex}
-          showTranslation={translation}
-          selection={selection}
-          onSelect={select}
-          onSeek={seek}
-        >
-          {wide && sheet}
-        </Transcript>
+        {/* Only where it is shown: on a phone it would be hundreds of hidden elements kept up to date for nothing. */}
+        {wide && (
+          <Transcript
+            key={item.id}
+            segments={content?.segments ?? null}
+            level={content?.level ?? item.level}
+            current={segmentIndex}
+            showTranslation={translation}
+            selection={selection}
+            onSelect={select}
+            onSeek={seek}
+            onReplay={replay}
+            replaying={replaying}
+          >
+            {sheet}
+          </Transcript>
+        )}
       </div>
     </section>
   );

@@ -1,24 +1,22 @@
 "use client";
 
-import { BookOpen, ChevronLeft, ChevronRight, Heart, Settings as SettingsIcon } from "lucide-react";
+import { BookCopy, ChevronLeft, ChevronRight, Plus, UserRound } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { topicsForLanguage } from "@/lib/channels";
 import { cn } from "@/lib/cn";
 import { languageOf, type LanguageId } from "@/lib/languages";
 import { TOPICS } from "@/lib/topics";
+import { BUTTON_PRIMARY, BUTTON_SECONDARY } from "./brand";
 import { Logo } from "./Logo";
 
 interface Props {
   language: LanguageId;
   topic: string;
   onTopic: (id: string) => void;
-  savedCount: number;
-  /** Phones only: the header steps aside while a video plays. */
-  hidden?: boolean;
   onHome: () => void;
-  onOpenLiked: () => void;
-  onOpenDictionary: () => void;
-  onOpenSettings: () => void;
+  onOpenLibrary: () => void;
+  onOpenProfile: () => void;
+  onAdd: () => void;
 }
 
 /**
@@ -72,8 +70,9 @@ function Chips({ language, topic, onTopic }: Pick<Props, "language" | "topic" | 
   const scrollBy = (dir: number) => scroller.current?.scrollBy({ left: dir * 240, behavior: "smooth" });
 
   return (
-    // As wide as the chips need and centred, scrolling sideways when they do not fit.
-    <div className="pointer-events-auto relative mx-auto w-fit max-w-full">
+    // Phones: all the room right of the logo. Desktop: as wide as the chips need and centred.
+    // Either way they scroll sideways when they do not fit.
+    <div className="pointer-events-auto relative w-full md:mx-auto md:w-fit md:max-w-full">
       <div
         ref={scroller}
         onScroll={measure}
@@ -102,8 +101,7 @@ function Chips({ language, topic, onTopic }: Pick<Props, "language" | "topic" | 
               onClick={() => onTopic(chip.id)}
               className={cn(
                 "liquid relative z-10 h-8 shrink-0 rounded-lg border border-transparent px-3 text-sm font-medium",
-                // Glass over the video on phones, a soft tile on the page background on desktop.
-                selected ? "text-black" : "glass text-white hover:bg-white/15 md:glass-soft md:text-text",
+                selected ? "text-black" : "border-line bg-surface text-text hover:border-accent",
               )}
             >
               {chip.label}
@@ -142,59 +140,38 @@ function ArrowButton({ label, onClick, children }: { label: string; onClick: () 
   );
 }
 
-const HEADER_BUTTON =
-  "liquid glass-soft flex h-9 shrink-0 items-center gap-2 rounded-full px-2.5 text-sm font-medium text-white hover:bg-white/15 md:px-3.5";
+const HEADER_BUTTON = "h-9 shrink-0 px-3.5 text-sm";
 
 /**
- * Phones: the logo and the buttons in the header, the chips centred and floating over the top of the video.
+ * Phones: one row on the page background above the video, the logo on the left and the chips beside it.
+ * The rest is in the bar along the bottom there (see BottomNav).
  * Desktop, like YouTube: the navigation row on top and the chips in their own row below it, above the video.
  */
-export function TopBar({
-  language,
-  topic,
-  onTopic,
-  savedCount,
-  hidden = false,
-  onHome,
-  onOpenLiked,
-  onOpenDictionary,
-  onOpenSettings,
-}: Props) {
+export function TopBar({ language, topic, onTopic, onHome, onOpenLibrary, onOpenProfile, onAdd }: Props) {
   return (
-    // Phones: a floating card in the same glass as the subtitle card, with space on every side.
-    // Desktop: a solid full-width bar, the video starts below it.
-    // While hidden it fades and lifts away; `invisible` also takes its buttons out of reach.
-    <header
-      className={cn(
-        "pointer-events-none fixed inset-x-0 top-0 z-30 px-3 pt-[calc(env(safe-area-inset-top)+8px)] transition-[opacity,translate,visibility] duration-300 md:pointer-events-auto md:bg-bg md:px-0 md:pt-[env(safe-area-inset-top)]",
-        hidden && "max-md:invisible max-md:-translate-y-3 max-md:opacity-0",
-      )}
-    >
-      <div className="pointer-events-auto mx-auto flex h-14 max-w-6xl items-center gap-2 px-2 max-md:glass max-md:rounded-2xl md:h-auto md:flex-wrap md:gap-x-3 md:gap-y-0 md:px-4">
-        <button onClick={onHome} aria-label="Scrollish home" className="liquid mr-1 rounded-xl md:mr-2">
+    // Phones: no background of its own. Desktop: a solid full-width bar. The video starts below it either way.
+    <header className="fixed inset-x-0 top-0 z-30 pt-[env(safe-area-inset-top)] md:bg-bg">
+      <div className="mx-auto flex h-[var(--header-h)] max-w-6xl items-center gap-3 pl-3 md:h-auto md:flex-wrap md:gap-y-0 md:px-4">
+        <button onClick={onHome} aria-label="Scrollish home" className="liquid shrink-0 rounded-xl md:mr-2">
           <Logo />
         </button>
-        {/* Pushes the buttons to the right and, on desktop, sets the height of the navigation row. */}
-        <div aria-hidden className="flex-1 md:h-16" />
-        <div className="pointer-events-none absolute inset-x-0 top-full px-3 pt-2 md:pointer-events-auto md:static md:order-last md:basis-full md:px-0 md:pb-3 md:pt-0">
+        {/* Desktop: pushes the buttons to the right and sets the height of the navigation row. */}
+        <div aria-hidden className="hidden flex-1 md:block md:h-16" />
+        {/* The right padding on phones lets the last chip scroll clear of the screen edge. */}
+        <div className="min-w-0 flex-1 pr-3 md:order-last md:basis-full md:pb-3 md:pr-0">
           <Chips language={language} topic={topic} onTopic={onTopic} />
         </div>
-        <button onClick={onOpenLiked} aria-label="Liked videos" className={HEADER_BUTTON}>
-          <Heart size={18} />
-          <span className="hidden md:inline">Liked</span>
+        <button onClick={onAdd} className={cn(BUTTON_PRIMARY, HEADER_BUTTON, "max-md:hidden")}>
+          <Plus size={18} />
+          Add video
         </button>
-        <button onClick={onOpenDictionary} aria-label="Dictionary" className={HEADER_BUTTON}>
-          <BookOpen size={18} />
-          <span className="hidden md:inline">Dictionary</span>
-          {savedCount > 0 && (
-            <span className="grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-accent-ink">
-              {savedCount}
-            </span>
-          )}
+        <button onClick={onOpenLibrary} className={cn(BUTTON_SECONDARY, HEADER_BUTTON, "max-md:hidden")}>
+          <BookCopy size={18} />
+          Library
         </button>
-        <button onClick={onOpenSettings} aria-label="Settings" className={HEADER_BUTTON}>
-          <SettingsIcon size={18} />
-          <span className="hidden md:inline">Settings</span>
+        <button onClick={onOpenProfile} className={cn(BUTTON_SECONDARY, HEADER_BUTTON, "max-md:hidden")}>
+          <UserRound size={18} />
+          Profile
         </button>
       </div>
     </header>

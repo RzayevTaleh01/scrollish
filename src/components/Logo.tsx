@@ -14,9 +14,10 @@ export function LogoMark({ size = 32, className }: { size?: number; className?: 
   );
 }
 
+/** The name, set like the headlines of the home page: heavy capitals, tightly spaced. */
 export function Wordmark({ className }: { className?: string }) {
   return (
-    <span className={cn("font-bold tracking-tight", className)}>
+    <span className={cn("font-black uppercase tracking-tight", className)}>
       Scroll<span className="text-accent">ish</span>
     </span>
   );

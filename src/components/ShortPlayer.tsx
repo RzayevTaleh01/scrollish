@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { loadYouTubeApi } from "@/lib/youtube-iframe";
 
 /** What the slide may do with the player from outside, set once the player is ready. */
 export interface PlayerControls {
   seek: (seconds: number) => void;
+  /** Starts the video now, whatever was asked of it before: for a tap on a video that is not moving. */
+  play: () => void;
+  /** The video is moving, or loading so that it can. */
+  isRunning: () => boolean;
 }
 
 interface Props {
@@ -15,12 +19,14 @@ interface Props {
   active: boolean;
   paused: boolean;
   muted: boolean;
+  /** Playback speed, 1 being normal. */
+  speed: number;
   onReady: () => void;
-  /** Told when the video stops to load more, and when it moves again. */
-  onBuffering: (buffering: boolean) => void;
   onPlaying: () => void;
   onPausedChange: (paused: boolean) => void;
   onTime: (seconds: number, duration: number) => void;
+  /** The browser would not start the video with sound, so it plays silently until the next tap. */
+  onSoundBlocked: () => void;
 }
 
 /**
@@ -33,11 +39,24 @@ function hideYouTubeCaptions(player: YT.Player) {
 }
 
 const WARM_RETRY_MS = 1000;
+/** How long a video asked to play may take to get going before it is asked again. */
+const PLAY_CHECK_MS = 1500;
+/** How many times it is asked again, the later ones without sound in case the sound is what is refused. */
+const PLAY_TRIES = 4;
 
 /** A player that is warming up stays silent whatever the viewer's sound setting is. */
 function syncMute(player: YT.Player, muted: boolean, warming: boolean) {
   if (muted || warming) player.mute();
   else player.unMute();
+}
+
+/**
+ * On a slow or metered connection the next video is not buffered ahead: the one being watched needs
+ * all of the connection, and the viewer may never get to the next.
+ */
+function canWarm(): boolean {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  return !connection?.saveData && !/2g|3g/.test(connection?.effectiveType ?? "");
 }
 
 /** Sets a player going: on the video it already holds, or on `next` when it is handed another one. */
@@ -57,11 +76,12 @@ export function ShortPlayer({
   active,
   paused,
   muted,
+  speed,
   onReady,
-  onBuffering,
   onPlaying,
   onPausedChange,
   onTime,
+  onSoundBlocked,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YT.Player | null>(null);
@@ -73,11 +93,61 @@ export function ShortPlayer({
    * start. That makes YouTube buffer the clip, so it starts at once when it is swiped to.
    */
   const warmingRef = useRef(false);
-  const live = useRef({ videoId, active, paused, muted, onReady, onBuffering, onPlaying, onPausedChange, onTime });
+  /**
+   * The playback this player was asked for and that has not started yet (pending), and a pause this
+   * code asked for itself (selfPause). YouTube reports every pause alike, but only the viewer's should
+   * bring up the play button: not the warm-up's own pause, and not a browser refusing the sound.
+   */
+  const run = useRef({ pending: false, selfPause: false, tries: 0, watchdog: 0 });
+  const live = useRef({ videoId, active, paused, muted, speed, onReady, onPlaying, onPausedChange, onTime, onSoundBlocked });
 
   useEffect(() => {
-    live.current = { videoId, active, paused, muted, onReady, onBuffering, onPlaying, onPausedChange, onTime };
+    live.current = { videoId, active, paused, muted, speed, onReady, onPlaying, onPausedChange, onTime, onSoundBlocked };
   });
+
+  /**
+   * Keeps an eye on a playback that was asked for: one that has not got going after a moment is asked
+   * again, and the later tries are silent, since a browser that refuses sound still allows a silent video.
+   */
+  const watch = useCallback(() => {
+    window.clearTimeout(run.current.watchdog);
+    const check = () => {
+      const player = playerRef.current;
+      if (!player || !run.current.pending || !live.current.active) return;
+      const state = player.getPlayerState();
+      if (state === YT.PlayerState.PLAYING) return;
+      run.current.tries++;
+      // Loading is progress: it is given more time before anything is done about it.
+      if (state !== YT.PlayerState.BUFFERING) {
+        if (run.current.tries >= PLAY_TRIES / 2 && !player.isMuted()) {
+          player.mute();
+          live.current.onSoundBlocked();
+        }
+        player.playVideo();
+      }
+      if (run.current.tries < PLAY_TRIES) run.current.watchdog = window.setTimeout(check, PLAY_CHECK_MS);
+    };
+    run.current.watchdog = window.setTimeout(check, PLAY_CHECK_MS);
+  }, []);
+
+  /** The real playback, on screen and meant to be seen: not a warm-up. */
+  const play = useCallback(() => {
+    const player = playerRef.current;
+    if (!player || !readyRef.current) return;
+    warmingRef.current = false;
+    run.current = { ...run.current, pending: true, selfPause: false, tries: 0 };
+    syncMute(player, live.current.muted, false);
+    player.playVideo();
+    watch();
+  }, [watch]);
+
+  const pause = useCallback(() => {
+    const player = playerRef.current;
+    if (!player || !readyRef.current) return;
+    window.clearTimeout(run.current.watchdog);
+    run.current = { ...run.current, pending: false, selfPause: true };
+    player.pauseVideo();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,32 +181,64 @@ export function ShortPlayer({
           onReady: (e) => {
             readyRef.current = true;
             live.current.onReady();
-            if (controls) controls.current = { seek: (seconds) => e.target.seekTo(seconds, true) };
+            if (controls) {
+              controls.current = {
+                seek: (seconds) => e.target.seekTo(seconds, true),
+                play,
+                isRunning: () => {
+                  const state = e.target.getPlayerState();
+                  return state === api.PlayerState.PLAYING || state === api.PlayerState.BUFFERING;
+                },
+              };
+            }
             // The slide may have been handed another video while the player was still being built.
             const changed = live.current.videoId !== heldRef.current;
             heldRef.current = live.current.videoId;
-            warmingRef.current = !live.current.active;
+            warmingRef.current = !live.current.active && canWarm();
             syncMute(e.target, live.current.muted, warmingRef.current);
-            start(e.target, warmingRef.current || !live.current.paused, changed ? heldRef.current : null);
+            const real = live.current.active && !live.current.paused;
+            if (real) {
+              run.current = { ...run.current, pending: true, selfPause: false, tries: 0 };
+              watch();
+            }
+            start(e.target, warmingRef.current || real, changed ? heldRef.current : null);
           },
           onStateChange: (e) => {
             if (e.data === api.PlayerState.PLAYING && warmingRef.current) {
               warmingRef.current = false;
+              run.current.selfPause = true;
               e.target.pauseVideo();
               e.target.seekTo(0, true);
               syncMute(e.target, live.current.muted, false);
               return;
             }
-            if (!warmingRef.current) live.current.onBuffering(e.data === api.PlayerState.BUFFERING);
             if (e.data === api.PlayerState.PLAYING) {
+              window.clearTimeout(run.current.watchdog);
+              run.current = { ...run.current, pending: false, selfPause: false };
               // The module loads with playback, so it is unloaded here rather than on ready.
               hideYouTubeCaptions(e.target);
+              // The speed belongs to the video, not the player: every video handed over starts at normal speed.
+              if (e.target.getPlaybackRate() !== live.current.speed) e.target.setPlaybackRate(live.current.speed);
               live.current.onPlaying();
               live.current.onPausedChange(false);
-            } else if (e.data === api.PlayerState.PAUSED && live.current.active && !document.hidden) {
-              // Paused while the page is on screen: by the viewer, through YouTube or the system's own controls.
-              // A browser may also pause a silent video in a tab that is put away, and that is not the viewer's doing.
-              live.current.onPausedChange(true);
+            } else if (e.data === api.PlayerState.PAUSED) {
+              if (run.current.selfPause) {
+                // This code's own pause: the warm-up stopping at the start, or a video swiped away.
+                run.current.selfPause = false;
+              } else if (live.current.active && run.current.pending && !e.target.isMuted()) {
+                // Asked to play and stopped at once: the browser refused it with sound. It plays silently,
+                // and the viewer's next tap brings the sound back.
+                e.target.mute();
+                live.current.onSoundBlocked();
+                e.target.playVideo();
+              } else if (live.current.active && !document.hidden) {
+                // Paused while the page is on screen, through the system's own controls, or refused even
+                // silently: the play button lets the viewer start it. A browser may also pause a silent
+                // video in a tab that is put away, and that is not the viewer's doing.
+                window.clearTimeout(run.current.watchdog);
+                run.current.pending = false;
+                live.current.onPausedChange(true);
+              }
             }
             // Shorts loop until the viewer swipes away.
             if (e.data === api.PlayerState.ENDED) {
@@ -152,34 +254,36 @@ export function ShortPlayer({
       cancelled = true;
       readyRef.current = false;
       warmingRef.current = false;
+      window.clearTimeout(run.current.watchdog);
       if (controls) controls.current = null;
       playerRef.current?.destroy();
       playerRef.current = null;
     };
-  }, [controls]);
+  }, [controls, play, watch]);
 
   // Handed another video: the player stays, only the clip is loaded, and it warms up like a new one.
   useEffect(() => {
     const player = playerRef.current;
     if (!player || !readyRef.current || heldRef.current === videoId) return;
     heldRef.current = videoId;
-    warmingRef.current = !live.current.active;
+    warmingRef.current = !live.current.active && canWarm();
     syncMute(player, live.current.muted, warmingRef.current);
-    start(player, warmingRef.current || !live.current.paused, videoId);
-  }, [videoId]);
+    const real = live.current.active && !live.current.paused;
+    run.current = { ...run.current, pending: real, selfPause: false, tries: 0 };
+    if (real) watch();
+    start(player, warmingRef.current || real, videoId);
+  }, [videoId, watch]);
 
   useEffect(() => {
     const player = playerRef.current;
     if (!player || !readyRef.current) return;
     if (active && !paused) {
       // Swiped to before the warm-up finished: it simply carries on as the real playback.
-      warmingRef.current = false;
-      syncMute(player, live.current.muted, false);
-      player.playVideo();
+      play();
     } else if (!warmingRef.current) {
-      player.pauseVideo();
+      pause();
     }
-  }, [active, paused]);
+  }, [active, paused, play, pause]);
 
   useEffect(() => {
     const player = playerRef.current;
@@ -187,15 +291,19 @@ export function ShortPlayer({
     syncMute(player, muted, warmingRef.current);
   }, [muted]);
 
+  useEffect(() => {
+    if (readyRef.current) playerRef.current?.setPlaybackRate(speed);
+  }, [speed]);
+
   // Back from another tab: whatever the browser did to the video meanwhile, it should be playing again.
   useEffect(() => {
     if (!active || paused) return;
     const resume = () => {
-      if (!document.hidden && readyRef.current) playerRef.current?.playVideo();
+      if (!document.hidden) play();
     };
     document.addEventListener("visibilitychange", resume);
     return () => document.removeEventListener("visibilitychange", resume);
-  }, [active, paused]);
+  }, [active, paused, play]);
 
   // Browsers refuse to start a video before the first tap on the page, even a silent one,
   // so a warm-up that did not get going is asked again until it does.

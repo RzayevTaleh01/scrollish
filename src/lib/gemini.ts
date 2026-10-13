@@ -1,3 +1,4 @@
+import { snapPhrases } from "./phrases";
 import type { RawSegment } from "./segments";
 import type { Level, Phrase, PhraseKind, WordGloss } from "./types";
 import { LEVELS } from "./types";
@@ -35,6 +36,7 @@ const KINDS: PhraseKind[] = ["collocation", "idiom", "phrasal verb", "expression
 
 const text = { type: "string" };
 const int = { type: "integer" };
+const num = { type: "number" };
 const list = (properties: Record<string, object>) => ({
   type: "array",
   items: { type: "object", properties, required: Object.keys(properties) },
@@ -60,6 +62,23 @@ const RESPONSE_SCHEMA = {
   },
   required: ["v"],
 };
+
+/** The answer to a request for the speech of a video: its language and its lines with their times. */
+const TRANSCRIPT_SCHEMA = {
+  type: "object",
+  properties: {
+    language: text,
+    lines: list({ m: int, s: num, t: text }),
+  },
+  required: ["language", "lines"],
+};
+
+interface Request {
+  prompt: string;
+  schema: object;
+  /** Address of a public YouTube video for the model to watch. Google fetches it itself. */
+  video?: string;
+}
 
 /** Request options a model turned down, so they are not sent to it again. */
 const withoutThinking = new Set<string>();
@@ -175,7 +194,10 @@ Return one object per video in "v":
 - "s": one object for every segment of the video:
   "i" the segment number. "tr" a natural Azerbaijani translation of the whole segment (standard Azerbaijani, Latin script).
   "p" the multi-word units a learner should study as ONE item, an empty list when there are none: "f" index of the first token, "t" index of the last token, "k" kind (collocation, idiom, phrasal verb or expression), "c" CEFR level, "l" base form of the unit in ${language}, "e" a short meaning in simple English, "a" the Azerbaijani meaning in this context.
-  Use only contiguous tokens (2 to 6), no overlapping units, at most 3 per segment, and only when the meaning is not obvious from the separate words. In English such units would be "make a decision", "talk someone down", "break the ice" and "as well as": find the same kinds of units in ${language}.
+  What counts as a unit: phrasal verbs ("turn out", "pick up"), idioms ("break the ice"), fixed expressions ("as well as", "kind of", "have to") and collocations where the learner would not guess which words go together ("make a decision", "heavy rain"). In English these are the examples: find the same kinds of units in ${language}.
+  What does not count: two words that merely stand next to each other, a verb with its ordinary object, names, and plain compound nouns or technical terms whose meaning is just the sum of the words ("file system", "social media", "late night").
+  "f" and "t" must cover every word of the unit and nothing before or after it: for "has necessarily kept up" the unit "keep up" is the two tokens "kept" and "up". Count the indexes from the numbers written in front of the tokens. Use only contiguous tokens (2 to 6), no overlapping units, at most 3 per segment.
+  "c" is the level at which a learner normally meets the unit as a whole, the same wherever it appears: "a lot of", "have to" and "look at" are A1, "kind of" and "pick up" A2, "turn out" and "figure out" B1, "break the ice" B2. An idiom is never below B1.
   "x" corrections, usually an empty list: only for a token whose meaning in THIS sentence differs from its meaning in the glossary or in the "Known" list: "i" token index, "a" the Azerbaijani meaning here.
 
 Words in the "Known" list already have the translation shown after the equals sign. Do not repeat them in the glossary.
@@ -185,25 +207,30 @@ ${blocks.join("\n\n")}`;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function requestBody(prompt: string, model: string): string {
+function requestBody(request: Request, model: string): string {
   const thinking = THINKING_LEVEL !== "off" && !withoutThinking.has(model);
   return JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
+    contents: [
+      {
+        parts: [...(request.video ? [{ file_data: { file_uri: request.video } }] : []), { text: request.prompt }],
+      },
+    ],
     generationConfig: {
-      temperature: 0.2,
+      // Writing down speech leaves nothing to choose: the same video should give the same lines.
+      temperature: request.video ? 0 : 0.2,
       responseMimeType: "application/json",
       maxOutputTokens: 32768,
-      ...(!withoutSchema.has(model) && { responseJsonSchema: RESPONSE_SCHEMA }),
+      ...(!withoutSchema.has(model) && { responseJsonSchema: request.schema }),
       ...(thinking && { thinkingConfig: { thinkingLevel: THINKING_LEVEL } }),
     },
   });
 }
 
 /**
- * Sends one prompt, walking the keys and for each key the models, like LangVis does.
+ * Sends one request, walking the keys and for each key the models, like LangVis does.
  * A pair that is out of quota, busy or gone rests for a while and the next one answers.
  */
-async function generate(prompt: string): Promise<{ text: string; model: string }> {
+async function generate(request: Request): Promise<{ text: string; model: string }> {
   const keys = geminiKeys();
   if (!keys.length) throw new GeminiError(401, "No Gemini API key is set");
 
@@ -224,7 +251,7 @@ async function generate(prompt: string): Promise<{ text: string; model: string }
           res = await fetch(`${API_ROOT}/models/${model}:generateContent`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-            body: requestBody(prompt, model),
+            body: requestBody(request, model),
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
           });
         } catch (err) {
@@ -283,6 +310,9 @@ async function generate(prompt: string): Promise<{ text: string; model: string }
           resting.set(id, Date.now() + REST_BUSY_MS);
           break;
         }
+
+        // Not every model can watch a video: the next one is asked instead.
+        if (request.video && res.status === 400) break;
 
         // Anything else is not the model's fault (a bad request): stop here.
         throw lastError;
@@ -391,9 +421,7 @@ function parseVideo(
         az: meaning,
       });
     }
-    phrases.sort((a, b) => a.from - b.from);
-
-    result.push({ tr, words, phrases });
+    result.push({ tr, words, phrases: snapPhrases(segment.tokens, words, phrases) });
   }
   return result;
 }
@@ -414,7 +442,7 @@ export async function analyzeVideos(
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const reply = await generate(prompt);
+      const reply = await generate({ prompt, schema: RESPONSE_SCHEMA });
       const json = JSON.parse(reply.text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
       const entries = new Map<number, Record<string, unknown>>();
       for (const entry of asRecords(json?.v)) {
@@ -435,4 +463,47 @@ export async function analyzeVideos(
     }
   }
   throw lastError instanceof Error ? lastError : new Error("Gemini output was invalid");
+}
+
+export interface SpokenLine {
+  start: number;
+  end: number;
+  text: string;
+}
+
+/**
+ * Has Gemini watch a public YouTube video and write down what is said in it, line by line with
+ * times. For videos whose captions YouTube will not give this server, or that have none: Google
+ * fetches the video on its own side, so nothing is read from YouTube here.
+ * The times are good to about half a second, which is close enough for subtitles. Only the start
+ * of each line is asked for: asked for lengths as well, the model adds them up instead of reading
+ * the clock, and the lines drift further and further from the speech.
+ * Videos in a language other than `languages` come back with their language and no lines.
+ */
+export async function transcribeVideo(videoId: string, languages: string[]): Promise<{ lang: string; cues: SpokenLine[] }> {
+  const prompt = `Write down exactly what is said in this video, in the language it is spoken in, without translating.
+"language": the ISO 639-1 code of the spoken language.
+"lines": the speech split into short lines of one sentence or clause each (at most about 12 words). For every line: "m" and "s" give the moment on the video's own clock at which its first word is heard, "m" the whole minutes and "s" the seconds within that minute with one decimal (so 1 minute 7.5 seconds is m 1, s 7.5). Read each moment off the video itself: do not work it out from the previous line. "t" is the words as spoken.
+Leave out music, sound effects and on-screen text that is not spoken.
+If the spoken language is not one of ${languages.join(", ")}, give the language and an empty list of lines.`;
+
+  const reply = await generate({ prompt, schema: TRANSCRIPT_SCHEMA, video: `https://www.youtube.com/watch?v=${videoId}` });
+  const json = JSON.parse(reply.text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+
+  const cues: SpokenLine[] = [];
+  for (const line of asRecords(json?.lines)) {
+    const start = Number(line.m) * 60 + Number(line.s);
+    const words = asText(line.t, 400);
+    if (!Number.isFinite(start) || start < 0 || !words) continue;
+    // Until the next line is known, a line is taken to last as long as its words take to say.
+    cues.push({ start, end: start + Math.max(1.5, words.split(/\s+/).length * 0.4), text: words });
+  }
+  cues.sort((a, b) => a.start - b.start);
+  // A line lasts until the next one starts.
+  cues.forEach((cue, i) => {
+    const next = cues[i + 1];
+    if (next) cue.end = next.start;
+  });
+
+  return { lang: asText(json?.language, 12).toLowerCase().slice(0, 2), cues };
 }

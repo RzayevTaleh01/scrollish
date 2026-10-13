@@ -17,6 +17,9 @@ export interface Transcript {
 /** The video has no usable captions in the language (permanent, never worth a retry). */
 export class NoTranscriptError extends Error {}
 
+/** The video has no captions of any kind, so there is nothing to tell what language it is in. */
+export class NoCaptionsError extends NoTranscriptError {}
+
 /**
  * YouTube refused to answer this server, usually "Sign in to confirm you're not a bot", which it shows
  * to data-centre addresses such as Cloud Run. Says nothing about the video, so it must not be recorded.
@@ -150,6 +153,7 @@ export async function fetchTranscript(videoId: string, lang: string): Promise<Tr
  */
 export async function fetchSpokenTranscript(videoId: string, langs: string[]): Promise<Transcript & { lang: string }> {
   const tracks = await fetchTracks(videoId);
+  if (!tracks.length) throw new NoCaptionsError("the video has no captions");
   const spoken = tracks.find((t) => t.kind === "asr");
   const lang = (spoken ? langs.filter((l) => inLanguage(spoken, l)) : langs).find((l) =>
     tracks.some((t) => inLanguage(t, l)),

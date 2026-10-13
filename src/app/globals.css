@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Screens too short for everything: small phones, browser bars, laptops with a short window. */
+@custom-variant short (@media (max-height: 700px));
+
 /* Flat design system: solid colors only, no gradients. Change the brand color in one place here. */
 :root {
   --bg: #0f0f0f;
@@ -16,22 +19,35 @@
   --translation: #ffd84d;
 
   /*
-   * Video card, like YouTube Shorts: it starts below the header and is never cropped.
-   * It takes all the height that is left and is as wide as a 9:16 video of that height,
-   * or the full screen width on tall phones (the video then sits at the top of the card).
+   * Video card, like YouTube Shorts: it starts below the header and takes all the height that is left.
+   * Phones, top to bottom: the header, the card with a little space either side, the seek bar
+   * and the navigation bar. Desktop: the header, then a card exactly 9:16, never cropped.
    */
-  --header-h: 56px;
-  /* Phones: the video fills the whole screen and the glass header floats over it. */
+  --header-h: 52px;
   --gap: 0px;
-  --top: 0px;
-  --card-h: calc(100dvh - var(--top) - var(--gap));
-  --card-w: 100vw;
+  --top: calc(var(--header-h) + env(safe-area-inset-top, 0px));
   /*
-   * Phones: the video fills the whole card, like the Shorts app. It keeps 9:16 and is centred,
-   * so on a screen of another shape only the edges that stick out are cut.
-   * On desktop the card is exactly 9:16, so nothing is cut there.
+   * Phones: the player bar under the video, and the navigation bar floating above the bottom edge.
+   * Both are glass (BAR in components/brand.ts); these are the heights kept free for them, margins included.
    */
-  --video-w: max(var(--card-w), calc(var(--card-h) * 9 / 16));
+  --seek-h: 52px;
+  --nav-h: calc(60px + env(safe-area-inset-bottom));
+  /* The round plus in the middle of the navigation bar rises this far above it, into space kept free for it. */
+  --nav-lift: 8px;
+  /*
+   * Phones: YouTube draws its logo and buttons along the top of the video, and its title along the
+   * bottom. The video reaches this far past the top and the bottom of the card, so they are out of
+   * sight without a blur over them.
+   */
+  --cut-top: 36px;
+  --cut-bottom: 72px;
+  --card-h: calc(100dvh - var(--top) - var(--gap) - var(--seek-h) - var(--nav-lift) - var(--nav-h));
+  --card-w: calc(100vw - 16px);
+  /*
+   * The video keeps 9:16 and covers the card, centred, so on a card of another shape only the
+   * edges that stick out are cut. On desktop the card is exactly 9:16, so nothing is cut there.
+   */
+  --video-w: max(var(--card-w), calc((var(--card-h) + var(--cut-top) + var(--cut-bottom)) * 9 / 16));
   --video-h: calc(var(--video-w) * 16 / 9);
 }
 
@@ -42,6 +58,12 @@
     --header-h: 108px;
     --gap: 16px;
     --top: calc(var(--header-h) + env(safe-area-inset-top, 0px) + var(--gap));
+    /* No seek bar and no navigation bar on desktop, and the video is shown whole. */
+    --seek-h: 0px;
+    --nav-h: 0px;
+    --nav-lift: 0px;
+    --cut-top: 0px;
+    --cut-bottom: 0px;
   }
 }
 
@@ -95,17 +117,46 @@ button:disabled {
 /*
  * Liquid glass. Surfaces are see-through and blur what is behind them, with a thin light
  * rim on the upper edge. Still solid colors only: the depth comes from blur and the rim.
+ * Phones get no blur at all: there the depth comes from the rim and a soft shadow alone.
  */
 
-/* On top of the video. */
+/* Cards with text on top of the video: subtitles, the channel. Dark enough to read on any picture. */
 @utility glass {
-  background-color: rgb(14 14 14 / 0.58);
+  background-color: rgb(14 14 14 / 0.6);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
   backdrop-filter: blur(22px) saturate(180%);
   border: 1px solid rgb(255 255 255 / 0.13);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.2),
     0 6px 20px rgb(0 0 0 / 0.22);
+
+  @media (max-width: 767px) {
+    background-color: rgb(14 14 14 / 0.6);
+    border-color: rgb(255 255 255 / 0.16);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/*
+ * Buttons on top of the video: the page background, half see-through, lit along the upper rim.
+ * Dark enough that a white icon reads on the brightest picture, light enough to stay glass.
+ */
+@utility glass-button {
+  background-color: rgb(14 14 14 / 0.6);
+  border: 1px solid rgb(255 255 255 / 0.18);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22);
+  color: #fff;
+
+  & svg,
+  & > span {
+    filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.35));
+  }
+
+  @media (min-width: 768px) {
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    backdrop-filter: blur(16px) saturate(180%);
+  }
 }
 
 /* Sheets and full-screen panels: darker, so long text stays easy to read. */
@@ -115,6 +166,44 @@ button:disabled {
   backdrop-filter: blur(32px) saturate(170%);
   border: 1px solid rgb(255 255 255 / 0.12);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
+
+  @media (max-width: 767px) {
+    background-color: rgb(20 20 20 / 0.97);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/*
+ * Cards with text on the video: the subtitles, the video's info, the call for sound. The dark of the
+ * sheet that explains a tapped word, but letting the picture through a little, with a faint rim, so
+ * they sit lightly on the video. Still dark enough for white text on a bright picture.
+ */
+@utility glass-card {
+  background-color: rgb(14 14 14 / 0.62);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  backdrop-filter: blur(24px) saturate(170%);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1);
+
+  @media (max-width: 767px) {
+    background-color: rgb(18 18 18 / 0.72);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/*
+ * Phones: the bars at the bottom. The next video slides under the navigation bar as it is swiped
+ * in, so they are glass: the page's dark, half see-through, with the picture behind blurred.
+ * A faint line round them and nothing else: no shadow, no glow.
+ */
+@utility glass-bar {
+  background-color: rgb(15 15 15 / 0.62);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
 }
 
 /* On the page background or inside a panel, where there is nothing to blur. */
@@ -163,15 +252,61 @@ button:disabled {
   }
 }
 
+/* Leaving: the same moves played back, a little quicker. Their length is EXIT_MS in lib/presence.ts. */
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes sink {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
 .animate-fade-in {
   animation: fade-in 0.3s ease-out both;
 }
 .animate-rise {
   animation: rise 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
-/* Fades in only after a short wait: for things that should not flash when the wait is brief. */
-.animate-late {
-  animation: fade-in 0.25s ease-out 0.4s both;
+/* For what changes often, like a subtitle line taking the place of the one before. */
+.animate-fade-quick {
+  animation: fade-in 0.15s ease-out both;
+}
+.animate-fade-out {
+  animation: fade-out 0.2s ease-in both;
+}
+.animate-sink {
+  animation: sink 0.2s ease-in both;
+}
+
+/*
+ * Skeletons: the shape of what is loading, in place, breathing slowly, so the page never jumps
+ * from empty to full. Flat like everything else: the breath is in the opacity, not a sheen.
+ */
+@keyframes skeleton {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@utility skeleton {
+  background-color: rgb(255 255 255 / 0.08);
+  animation: skeleton 1.6s ease-in-out infinite;
 }
 
 /*
@@ -401,7 +536,201 @@ button:disabled {
   }
 }
 
+/*
+ * Liking a video. On the button the heart springs up, a ring opens round it and sparks fly off.
+ * Over the video a big heart rises and fades, so the like is seen even with a thumb on the button.
+ */
+.like-pop {
+  animation: like-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes like-pop {
+  0% {
+    scale: 0.4;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+.like-ring {
+  animation: like-ring 0.6s ease-out forwards;
+}
+@keyframes like-ring {
+  0% {
+    scale: 0.4;
+    opacity: 0.9;
+  }
+  100% {
+    scale: 1.9;
+    opacity: 0;
+  }
+}
+
+.like-spark {
+  animation: like-spark 0.5s ease-out forwards;
+}
+@keyframes like-spark {
+  0% {
+    translate: 0 0;
+    scale: 1;
+    opacity: 1;
+  }
+  100% {
+    translate: var(--dx) var(--dy);
+    scale: 0.3;
+    opacity: 0;
+  }
+}
+
+.like-heart {
+  animation: like-heart 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+@keyframes like-heart {
+  0% {
+    scale: 0.3;
+    opacity: 0;
+  }
+  18% {
+    scale: 1.15;
+    opacity: 1;
+  }
+  32%,
+  68% {
+    scale: 1;
+    opacity: 1;
+  }
+  100% {
+    scale: 1.1;
+    translate: 0 -18px;
+    opacity: 0;
+  }
+}
+
+/* A count in the header gives a little jump when it changes. */
+.count-bump {
+  animation: count-bump 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes count-bump {
+  0% {
+    scale: 0.6;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+/*
+ * The card shown while a video is being analysed. One loop of 6 seconds, in three parts of 2:
+ * the words of a subtitle line appear, the translation is drawn in under them, one word is picked
+ * out and gets its meaning. --at shifts a part to its own moment (seconds into the loop).
+ */
+.prep-word {
+  animation: prep-word 6s ease-out var(--at, 0s) infinite backwards;
+}
+@keyframes prep-word {
+  0% {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  5%,
+  82% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  90%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+.prep-line {
+  transform-origin: left;
+  animation: prep-line 6s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+@keyframes prep-line {
+  0%,
+  33% {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+  45%,
+  84% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  92%,
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+/* The picked word takes the selection color, and its meaning pops up over it. */
+.prep-pick {
+  animation: prep-pick 6s step-end infinite;
+}
+@keyframes prep-pick {
+  0%,
+  88%,
+  100% {
+    background-color: rgb(255 255 255 / 0.85);
+  }
+  66% {
+    background-color: var(--accent);
+  }
+}
+.prep-tip {
+  animation: prep-tip 6s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+}
+@keyframes prep-tip {
+  0%,
+  68% {
+    opacity: 0;
+    scale: 0.7;
+  }
+  74%,
+  86% {
+    opacity: 1;
+    scale: 1;
+  }
+  92%,
+  100% {
+    opacity: 0;
+    scale: 1;
+  }
+}
+
+/* The line under the title names the part that is playing. */
+.prep-step {
+  opacity: 0;
+  animation: prep-step 6s ease-out infinite;
+  animation-delay: calc(var(--at, 0s) - 6s);
+}
+@keyframes prep-step {
+  0%,
+  33.3%,
+  100% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  4%,
+  29% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .like-ring,
+  .like-spark,
+  .like-heart {
+    display: none;
+  }
+  .like-pop,
+  .count-bump {
+    animation: none;
+  }
   .phone-feed,
   .demo-pick,
   .demo-sheet,
@@ -411,19 +740,28 @@ button:disabled {
   .demo-swipe-down,
   .demo-swipe-up,
   .demo-badge,
-  .demo-caption {
+  .demo-caption,
+  .prep-word,
+  .prep-line,
+  .prep-pick,
+  .prep-tip,
+  .prep-step {
     animation: none;
   }
   /* With nothing moving, the first hint stays under the phone. */
-  .demo-caption:first-child {
+  .demo-caption:first-child,
+  .prep-step:first-child {
     opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in,
-  .animate-late,
-  .animate-rise {
+  .animate-rise,
+  .animate-fade-quick,
+  .animate-fade-out,
+  .animate-sink,
+  .skeleton {
     animation: none;
   }
   .liquid,

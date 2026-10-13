@@ -1,8 +1,9 @@
 "use client";
 
 import { Heart, Languages, Share2, Volume2, VolumeX } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
+import { formatSpeed } from "./SpeedSheet";
 
 function IconButton({
   label,
@@ -26,8 +27,8 @@ function IconButton({
       onClick={onClick}
       className={cn(
         "liquid grid size-11 place-items-center rounded-full md:size-12",
-        // Glass over the video on phones, a soft tile on the page background on desktop.
-        active && activeClass ? activeClass : "glass text-white md:glass-soft",
+        // Clear glass over the video on phones, a soft tile on the page background on desktop.
+        active && activeClass ? activeClass : "max-md:glass-button md:glass-soft",
       )}
     >
       {children}
@@ -35,22 +36,73 @@ function IconButton({
   );
 }
 
+/** Where the sparks of a like fly to, as steps round the heart, and which of the app's colors each takes. */
+const SPARKS = [0, 60, 120, 180, 240, 300].map((degrees, i) => ({
+  x: Math.round(Math.cos((degrees * Math.PI) / 180) * 26),
+  y: Math.round(Math.sin((degrees * Math.PI) / 180) * 26),
+  color: ["bg-rose-500", "bg-translation", "bg-accent"][i % 3],
+}));
+
 interface Props {
   liked: boolean;
   translation: boolean;
   muted: boolean;
+  speed: number;
   onLike: () => void;
   onTranslation: () => void;
   onMute: () => void;
+  /** Opens the speed slider. */
+  onSpeed: () => void;
   onShare: () => void;
+  /** With the sound and speed buttons. Phones have those in the bar under the video instead. */
+  playback?: boolean;
   className?: string;
 }
 
-export function Actions({ liked, translation, muted, onLike, onTranslation, onMute, onShare, className }: Props) {
+export function Actions({
+  liked,
+  translation,
+  muted,
+  speed,
+  onLike,
+  onTranslation,
+  onMute,
+  onSpeed,
+  onShare,
+  playback = true,
+  className,
+}: Props) {
+  // Only a press that likes the video sets it off: not taking a like back, and not a slide
+  // that arrives showing a video liked earlier.
+  const [bursting, setBursting] = useState(false);
+
+  const like = () => {
+    if (!liked) setBursting(true);
+    onLike();
+  };
+
   return (
     <div className={cn("flex items-center gap-3", className)}>
-      <IconButton label="Like" onClick={onLike}>
-        <Heart size={22} className={liked ? "fill-rose-500 text-rose-500" : ""} />
+      <IconButton label={liked ? "Unlike" : "Like"} active={liked} onClick={like}>
+        <span className="relative grid place-items-center">
+          <Heart size={22} className={cn(liked && "fill-rose-500 text-rose-500", bursting && "like-pop")} />
+          {bursting && (
+            <>
+              {/* The ring is the last to finish, so it is the one that clears the burst away. */}
+              <span
+                onAnimationEnd={() => setBursting(false)}
+                className="like-ring pointer-events-none absolute size-9 rounded-full border-2 border-rose-500"
+              />
+              {SPARKS.map((spark, i) => (
+                <span
+                  key={i}
+                  style={{ "--dx": `${spark.x}px`, "--dy": `${spark.y}px` } as CSSProperties}
+                  className={cn("like-spark pointer-events-none absolute size-1.5 rounded-full", spark.color)}
+                />
+              ))}
+            </>
+          )}
+        </span>
       </IconButton>
       <IconButton
         label={translation ? "Hide Azerbaijani translation" : "Show Azerbaijani translation"}
@@ -60,9 +112,21 @@ export function Actions({ liked, translation, muted, onLike, onTranslation, onMu
       >
         <Languages size={21} />
       </IconButton>
-      <IconButton label={muted ? "Unmute" : "Mute"} onClick={onMute}>
-        {muted ? <VolumeX size={21} /> : <Volume2 size={21} />}
-      </IconButton>
+      {playback && (
+        <>
+          <IconButton label={muted ? "Unmute" : "Mute"} onClick={onMute}>
+            {muted ? <VolumeX size={21} /> : <Volume2 size={21} />}
+          </IconButton>
+          <IconButton
+            label={`Speed, now ${formatSpeed(speed)}`}
+            active={speed !== 1}
+            activeClass="bg-accent text-accent-ink"
+            onClick={onSpeed}
+          >
+            <span className="text-[13px] font-bold tabular-nums">{formatSpeed(speed)}</span>
+          </IconButton>
+        </>
+      )}
       <IconButton label="Share" onClick={onShare}>
         <Share2 size={20} />
       </IconButton>

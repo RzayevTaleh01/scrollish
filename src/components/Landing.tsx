@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { LANGUAGES, type LanguageId } from "@/lib/languages";
 import { TOPICS } from "@/lib/topics";
 import { LEVELS, type FeedItem, type Level } from "@/lib/types";
+import { EYEBROW, HEADLINE } from "./brand";
 import { Cover } from "./Cover";
 import { LevelBadge } from "./LevelBadge";
 import { LogoMark, Wordmark } from "./Logo";
@@ -20,8 +21,6 @@ interface Props {
   onLanguage: (language: LanguageId) => void;
 }
 
-export const EYEBROW = "text-[11px] font-semibold uppercase tracking-[0.18em] text-muted";
-export const HEADLINE = "font-black uppercase leading-[0.95] tracking-tight";
 const SECTION = "mx-auto w-full max-w-6xl px-5 md:px-8";
 
 interface Sheet {
@@ -469,7 +468,7 @@ function PhoneSlide({ demo, turn, item }: { demo: Demo; turn: number; item: Feed
             </span>{" "}
             {after}
           </p>
-          <p className={cn(OVERLAY_SECONDARY_TEXT, "mt-1 border-t border-white/15 pt-1 text-[11px] text-translation")}>
+          <p className={cn(OVERLAY_SECONDARY_TEXT, "mt-1 border-t border-white/[0.07] pt-1 text-[11px] font-medium text-translation")}>
             {demo.tr}
           </p>
         </div>

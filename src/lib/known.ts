@@ -1,6 +1,6 @@
 import { segmentsByLanguage } from "./db";
 import { videoLevel } from "./segments";
-import { LEVELS, type Level, type Segment, type WordGloss } from "./types";
+import { LEVELS, type Level, type PhraseKind, type Segment, type WordGloss } from "./types";
 
 /** Word classes whose translation hardly depends on the sentence (the, to, and, you...). */
 const CLOSED_CLASS = new Set(["det", "pron", "prep", "conj", "aux", "part", "num", "interj"]);
@@ -15,6 +15,22 @@ export interface LevelGuess {
   level: Level;
   guessable: Level[];
 }
+
+/** How often each answer was given for one word or phrase, a video counting once. */
+type Votes<T extends string> = Map<T, number>;
+
+/** The answer most videos gave. Between equals the first in `order` wins, which for levels is the easier one. */
+function winner<T extends string>(votes: Votes<T> | undefined, order: readonly T[]): T | null {
+  let best: T | null = null;
+  for (const option of order) {
+    const count = votes?.get(option) ?? 0;
+    if (count > (best ? votes!.get(best)! : 0)) best = option;
+  }
+  return best;
+}
+
+const KINDS: readonly PhraseKind[] = ["phrasal verb", "idiom", "collocation", "expression"];
+const wordKey = (gloss: WordGloss) => `${gloss.lemma}|${gloss.pos}`;
 
 interface FormStats {
   videos: number;
@@ -31,10 +47,20 @@ class KnownWords {
   /** The words of every analysed video with its level: what the level guesses are measured against. */
   private readonly videos: { level: Level; forms: string[] }[] = [];
   private typical: Map<Level, number> | null = null;
+  /**
+   * The level each word and phrase was given, video by video, and the kind each phrase was called.
+   * The model judges every video on its own and does not always agree with itself: the same word
+   * came back with two different levels for about three words in ten. What most videos said is
+   * taken as the answer, so a word shows the same level wherever it is met.
+   */
+  private readonly wordLevels = new Map<string, Votes<Level>>();
+  private readonly phraseLevels = new Map<string, Votes<Level>>();
+  private readonly phraseKinds = new Map<string, Votes<PhraseKind>>();
 
   addVideo(segments: Segment[]) {
     this.videos.push({ level: videoLevel(segments), forms: wordForms(segments) });
     this.typical = null;
+    this.vote(segments);
 
     const seen = new Map<string, WordGloss>();
     for (const segment of segments) {
@@ -52,6 +78,47 @@ class KnownWords {
       stats.byMeaning.set(gloss.az, entry);
       this.forms.set(form, stats);
     }
+  }
+
+  private vote(segments: Segment[]) {
+    const cast = <T extends string>(all: Map<string, Votes<T>>, key: string, value: T, done: Set<string>) => {
+      if (done.has(key)) return;
+      done.add(key);
+      const votes = all.get(key) ?? new Map<T, number>();
+      votes.set(value, (votes.get(value) ?? 0) + 1);
+      all.set(key, votes);
+    };
+    const words = new Set<string>();
+    const levels = new Set<string>();
+    const kinds = new Set<string>();
+    for (const segment of segments) {
+      for (const gloss of Object.values(segment.words)) cast(this.wordLevels, wordKey(gloss), gloss.lvl, words);
+      for (const phrase of segment.phrases) {
+        cast(this.phraseLevels, phrase.lemma, phrase.lvl, levels);
+        cast(this.phraseKinds, phrase.lemma, phrase.kind, kinds);
+      }
+    }
+  }
+
+  /**
+   * The same segments with every word and phrase at the level, and every phrase of the kind, that
+   * the videos so far agree on. What has not been met before keeps what it came with.
+   */
+  settle(segments: Segment[]): Segment[] {
+    return segments.map((segment) => ({
+      ...segment,
+      words: Object.fromEntries(
+        Object.entries(segment.words).map(([index, gloss]) => [
+          index,
+          { ...gloss, lvl: winner(this.wordLevels.get(wordKey(gloss)), LEVELS) ?? gloss.lvl },
+        ]),
+      ),
+      phrases: segment.phrases.map((phrase) => ({
+        ...phrase,
+        lvl: winner(this.phraseLevels.get(phrase.lemma), LEVELS) ?? phrase.lvl,
+        kind: winner(this.phraseKinds.get(phrase.lemma), KINDS) ?? phrase.kind,
+      })),
+    }));
   }
 
   /** The translations that are safe to reuse for the given word forms. */
@@ -117,8 +184,8 @@ export function wordForms(segments: { tokens: { w: string }[] }[]): string[] {
   return segments.flatMap((s) => s.tokens.map((t) => t.w.toLowerCase())).filter((form) => /\p{L}/u.test(form));
 }
 
-const g = globalThis as unknown as { __socialearnKnown?: Map<string, Promise<KnownWords>> };
-const cache = (g.__socialearnKnown ??= new Map<string, Promise<KnownWords>>());
+const g = globalThis as unknown as { __socialearnKnown2?: Map<string, Promise<KnownWords>> };
+const cache = (g.__socialearnKnown2 ??= new Map<string, Promise<KnownWords>>());
 
 /** Built once per language from the database, then kept up to date as videos are saved. */
 export function knownWords(lang: string): Promise<KnownWords> {

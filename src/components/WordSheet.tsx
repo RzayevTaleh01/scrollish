@@ -33,8 +33,10 @@ function useSwipeDown(onClose: () => void) {
   const dragged = useRef(false);
   const [offset, setOffset] = useState(0);
   const [moving, setMoving] = useState(false);
+  const [closing, setClosing] = useState(false);
 
   const close = () => {
+    setClosing(true);
     setOffset(sheetRef.current?.offsetHeight ?? 400);
     window.setTimeout(onClose, SLIDE_MS);
   };
@@ -82,6 +84,7 @@ function useSwipeDown(onClose: () => void) {
 
   return {
     close,
+    closing,
     props: {
       ref: sheetRef,
       onPointerDown,
@@ -126,93 +129,105 @@ export function WordSheet({ segment, selection, videoId, onSelect, onClose }: Pr
     });
 
   return (
-    // The outer layer follows the finger; the inner one keeps the rise-in animation, which would
-    // otherwise override the drag transform. touch-action stops the swipe from scrolling the feed.
-    <div {...swipe.props} className="absolute inset-x-0 bottom-0 z-40 touch-none select-none">
-      <div className="glass-strong animate-rise rounded-t-3xl px-5 pb-[calc(20px+env(safe-area-inset-bottom))] pt-2.5 text-left">
-        <div aria-hidden className="mx-auto mb-3 h-1.5 w-10 cursor-grab rounded-full bg-white/30" />
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <Tag>{resolved.kind === "phrase" ? "Phrase" : "Word"}</Tag>
-              {resolved.pos && <Tag>{resolved.pos}</Tag>}
-              {resolved.level && <LevelBadge level={resolved.level} />}
-            </div>
-            <h3 className="mt-2.5 break-words text-[26px] font-bold leading-tight">{resolved.surface}</h3>
-            {resolved.term !== resolved.surface.toLowerCase() && (
-              <p className="mt-0.5 text-sm text-muted">{resolved.term}</p>
-            )}
-          </div>
-          <div className="flex shrink-0 gap-2">
-            <SheetButton label="Pronounce" onClick={() => speak(resolved.surface, languageOf(language).speech)}>
-              <Volume2 size={19} />
-            </SheetButton>
-            <SheetButton label={saved ? "Remove from saved" : "Save"} active={saved} onClick={onSave}>
-              <Bookmark size={19} className={saved ? "fill-current" : ""} />
-            </SheetButton>
-            <SheetButton label="Close" onClick={swipe.close}>
-              <X size={19} />
-            </SheetButton>
-          </div>
-        </div>
-
-        {resolved.az ? (
-          <p className="mt-4 text-[22px] font-semibold leading-snug text-translation">{resolved.az}</p>
-        ) : (
-          <p className="mt-4 text-sm text-muted">No translation was generated for this word.</p>
+    <>
+      {/* A tap beside the sheet closes it like the close button: the sheet slides away, this fades. */}
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={swipe.close}
+        className={cn(
+          "absolute inset-0 z-30 bg-black/35 transition-opacity duration-200",
+          swipe.closing ? "opacity-0" : "animate-fade-in",
         )}
-        {resolved.en && <p className="mt-1 text-sm text-muted">{resolved.en}</p>}
+      />
+      {/* The outer layer follows the finger; the inner one keeps the rise-in animation, which would
+          otherwise override the drag transform. touch-action stops the swipe from scrolling the feed. */}
+      <div {...swipe.props} className="absolute inset-x-0 bottom-0 z-40 touch-none select-none">
+        <div className="glass-strong animate-rise rounded-t-3xl px-5 pb-[calc(20px+env(safe-area-inset-bottom))] pt-2.5 text-left">
+          <div aria-hidden className="mx-auto mb-3 h-1.5 w-10 cursor-grab rounded-full bg-white/30" />
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Tag>{resolved.kind === "phrase" ? "Phrase" : "Word"}</Tag>
+                {resolved.pos && <Tag>{resolved.pos}</Tag>}
+                {resolved.level && <LevelBadge level={resolved.level} />}
+              </div>
+              <h3 className="mt-2.5 break-words text-[26px] font-bold leading-tight">{resolved.surface}</h3>
+              {resolved.term !== resolved.surface.toLowerCase() && (
+                <p className="mt-0.5 text-sm text-muted">{resolved.term}</p>
+              )}
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <SheetButton label="Pronounce" onClick={() => speak(resolved.surface, languageOf(language).speech)}>
+                <Volume2 size={19} />
+              </SheetButton>
+              <SheetButton label={saved ? "Remove from saved" : "Save"} active={saved} onClick={onSave}>
+                <Bookmark size={19} className={saved ? "fill-current" : ""} />
+              </SheetButton>
+              <SheetButton label="Close" onClick={swipe.close}>
+                <X size={19} />
+              </SheetButton>
+            </div>
+          </div>
 
-        {resolved.kind === "phrase" && (
-          <div className="mt-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Pick a single word</p>
-            <div className="flex flex-wrap gap-2">
-              {resolved.words.map((w) => (
-                <button
-                  key={w.index}
-                  onClick={() => selectWord(w.index)}
-                  className="liquid glass-soft rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-white/15"
+          {resolved.az ? (
+            <p className="mt-4 text-[22px] font-semibold leading-snug text-translation">{resolved.az}</p>
+          ) : (
+            <p className="mt-4 text-sm text-muted">No translation was generated for this word.</p>
+          )}
+          {resolved.en && <p className="mt-1 text-sm text-muted">{resolved.en}</p>}
+
+          {resolved.kind === "phrase" && (
+            <div className="mt-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Pick a single word</p>
+              <div className="flex flex-wrap gap-2">
+                {resolved.words.map((w) => (
+                  <button
+                    key={w.index}
+                    onClick={() => selectWord(w.index)}
+                    className="liquid glass-soft rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-white/15"
+                  >
+                    {w.surface}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {resolved.kind === "word" && resolved.parent && (
+            <button
+              onClick={() =>
+                onSelect({
+                  segment: selection.segment,
+                  from: resolved.parent!.from,
+                  to: resolved.parent!.to,
+                  kind: "phrase",
+                })
+              }
+              className="liquid glass-soft mt-4 rounded-lg px-3 py-2 text-left text-sm hover:bg-white/15"
+            >
+              <span className="text-muted">Part of: </span>
+              <span className="font-semibold">{resolved.parent.lemma}</span>
+              <span className="text-translation"> ({resolved.parent.az})</span>
+            </button>
+          )}
+
+          <div className="glass-soft mt-4 rounded-2xl p-3.5">
+            <p className="text-[15px] leading-relaxed">
+              {segment.tokens.map((token, i) => (
+                <span
+                  key={i}
+                  className={cn(i >= selection.from && i <= selection.to && "font-semibold text-accent")}
                 >
-                  {w.surface}
-                </button>
+                  {token.t}{" "}
+                </span>
               ))}
-            </div>
+            </p>
+            {segment.tr && <p className="mt-1.5 text-sm leading-snug text-muted">{segment.tr}</p>}
           </div>
-        )}
-
-        {resolved.kind === "word" && resolved.parent && (
-          <button
-            onClick={() =>
-              onSelect({
-                segment: selection.segment,
-                from: resolved.parent!.from,
-                to: resolved.parent!.to,
-                kind: "phrase",
-              })
-            }
-            className="liquid glass-soft mt-4 rounded-lg px-3 py-2 text-left text-sm hover:bg-white/15"
-          >
-            <span className="text-muted">Part of: </span>
-            <span className="font-semibold">{resolved.parent.lemma}</span>
-            <span className="text-translation"> ({resolved.parent.az})</span>
-          </button>
-        )}
-
-        <div className="glass-soft mt-4 rounded-2xl p-3.5">
-          <p className="text-[15px] leading-relaxed">
-            {segment.tokens.map((token, i) => (
-              <span
-                key={i}
-                className={cn(i >= selection.from && i <= selection.to && "font-semibold text-accent")}
-              >
-                {token.t}{" "}
-              </span>
-            ))}
-          </p>
-          {segment.tr && <p className="mt-1.5 text-sm leading-snug text-muted">{segment.tr}</p>}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
