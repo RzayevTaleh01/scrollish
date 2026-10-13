@@ -1,6 +1,6 @@
 "use client";
 
-import { BookCopy, ChevronLeft, ChevronRight, Plus, UserRound } from "lucide-react";
+import { BookCopy, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { topicsForLanguage } from "@/lib/channels";
 import { cn } from "@/lib/cn";
@@ -8,6 +8,7 @@ import { languageOf, type LanguageId } from "@/lib/languages";
 import { TOPICS } from "@/lib/topics";
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from "./brand";
 import { Logo } from "./Logo";
+import { ProfileIcon } from "./ProfileIcon";
 
 interface Props {
   language: LanguageId;
@@ -17,6 +18,10 @@ interface Props {
   onOpenLibrary: () => void;
   onOpenProfile: () => void;
   onAdd: () => void;
+  /** Phones: the video has grown up under the row (see Feed), which then sits over its top corner. */
+  overVideo?: boolean;
+  /** Phones: the chips have faded away, leaving the video the room; the logo stays. */
+  chipsAway?: boolean;
 }
 
 /**
@@ -100,8 +105,8 @@ function Chips({ language, topic, onTopic }: Pick<Props, "language" | "topic" | 
               aria-selected={selected}
               onClick={() => onTopic(chip.id)}
               className={cn(
-                "liquid relative z-10 h-8 shrink-0 rounded-lg border border-transparent px-3 text-sm font-medium",
-                selected ? "text-black" : "border-line bg-surface text-text hover:border-accent",
+                "liquid relative z-10 h-8 shrink-0 rounded-lg px-3 text-sm font-medium",
+                selected ? "border border-transparent text-black" : "glass-chip text-white hover:bg-white/20",
               )}
             >
               {chip.label}
@@ -144,21 +149,52 @@ const HEADER_BUTTON = "h-9 shrink-0 px-3.5 text-sm";
 
 /**
  * Phones: one row on the page background above the video, the logo on the left and the chips beside it.
- * The rest is in the bar along the bottom there (see BottomNav).
+ * The rest is in the bar along the bottom there (see BottomNav). Once the viewer has moved on down the
+ * feed, the video grows up under the row: the logo stays over its corner and the chips go, coming back
+ * over the video while it is stopped.
  * Desktop, like YouTube: the navigation row on top and the chips in their own row below it, above the video.
  */
-export function TopBar({ language, topic, onTopic, onHome, onOpenLibrary, onOpenProfile, onAdd }: Props) {
+export function TopBar({
+  language,
+  topic,
+  onTopic,
+  onHome,
+  onOpenLibrary,
+  onOpenProfile,
+  onAdd,
+  overVideo = false,
+  chipsAway = false,
+}: Props) {
   return (
-    // Phones: no background of its own. Desktop: a solid full-width bar. The video starts below it either way.
-    <header className="fixed inset-x-0 top-0 z-30 pt-[env(safe-area-inset-top)] md:bg-bg">
-      <div className="mx-auto flex h-[var(--header-h)] max-w-6xl items-center gap-3 pl-3 md:h-auto md:flex-wrap md:gap-y-0 md:px-4">
-        <button onClick={onHome} aria-label="Scrollish home" className="liquid shrink-0 rounded-xl md:mr-2">
+    // Phones: no background of its own, and the row itself lets taps through to the video under it:
+    // only the logo and the chips take them. Desktop: a solid full-width bar. The video starts below it.
+    <header className="fixed inset-x-0 top-0 z-30 pt-[env(safe-area-inset-top)] max-md:pointer-events-none md:bg-bg">
+      {/*
+        Over the video the row moves in from its top corner, so the logo keeps the same space from the
+        card's edges as the subtitles and buttons have: in the time the card grows (--header-h).
+      */}
+      <div
+        className={cn(
+          "mx-auto flex h-[var(--bar-h)] max-w-6xl items-center gap-3 pl-3 transition-[translate,padding] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none md:h-auto md:flex-wrap md:gap-y-0 md:px-4",
+          overVideo && "max-md:translate-y-2.5 max-md:pl-5",
+        )}
+      >
+        <button onClick={onHome} aria-label="Scrollish home" className="liquid pointer-events-auto shrink-0 rounded-xl md:mr-2">
           <Logo />
         </button>
         {/* Desktop: pushes the buttons to the right and sets the height of the navigation row. */}
         <div aria-hidden className="hidden flex-1 md:block md:h-16" />
-        {/* The right padding on phones lets the last chip scroll clear of the screen edge. */}
-        <div className="min-w-0 flex-1 pr-3 md:order-last md:basis-full md:pb-3 md:pr-0">
+        {/*
+          The right padding on phones lets the last chip scroll clear of the screen edge. Away, they
+          are also invisible, which keeps taps off them once they have faded (the change of visibility
+          waits for the fade out, and comes at once on the way back in).
+        */}
+        <div
+          className={cn(
+            "min-w-0 flex-1 pr-3 transition-[translate,opacity,visibility] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none md:order-last md:basis-full md:pb-3 md:pr-0",
+            chipsAway && "max-md:invisible max-md:-translate-y-2 max-md:opacity-0",
+          )}
+        >
           <Chips language={language} topic={topic} onTopic={onTopic} />
         </div>
         <button onClick={onAdd} className={cn(BUTTON_PRIMARY, HEADER_BUTTON, "max-md:hidden")}>
@@ -170,7 +206,7 @@ export function TopBar({ language, topic, onTopic, onHome, onOpenLibrary, onOpen
           Library
         </button>
         <button onClick={onOpenProfile} className={cn(BUTTON_SECONDARY, HEADER_BUTTON, "max-md:hidden")}>
-          <UserRound size={18} />
+          <ProfileIcon size={18} />
           Profile
         </button>
       </div>

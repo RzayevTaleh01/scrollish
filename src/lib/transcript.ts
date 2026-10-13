@@ -140,6 +140,14 @@ async function readTrack(tracks: Track[], lang: string): Promise<Transcript> {
   return { cues, kind };
 }
 
+/**
+ * What caption tracks a video has, without reading them: their language, and whether YouTube made
+ * them by speech recognition. Throws like the reading does when YouTube will not say.
+ */
+export async function captionTracks(videoId: string): Promise<{ lang: string; auto: boolean }[]> {
+  return (await fetchTracks(videoId)).map((t) => ({ lang: t.languageCode?.toLowerCase() ?? "", auto: t.kind === "asr" }));
+}
+
 /** Reads the captions of a video in the given language (ISO code such as "en" or "sk"). */
 export async function fetchTranscript(videoId: string, lang: string): Promise<Transcript> {
   return readTrack(await fetchTracks(videoId), lang);

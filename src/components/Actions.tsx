@@ -26,13 +26,36 @@ function IconButton({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "liquid grid size-11 place-items-center rounded-full md:size-12",
+        // A little smaller on short phones, where the column has to fit above the subtitles.
+        "liquid grid size-11 place-items-center rounded-full max-md:short:size-10 md:size-12",
         // Clear glass over the video on phones, a soft tile on the page background on desktop.
         active && activeClass ? activeClass : "max-md:glass-button md:glass-soft",
       )}
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * The transcript button's icon: sound on the left and the lines of text it becomes on the right,
+ * which is what a transcript is. Drawn like the lucide icons around it.
+ */
+function TranscriptIcon({ size = 22 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <path d="M3 10v4M6.5 7v10M10 9.5v5" />
+      <path d="M14 7h7M14 12h6M14 17h4" />
+    </svg>
   );
 }
 
@@ -54,7 +77,10 @@ interface Props {
   /** Opens the speed slider. */
   onSpeed: () => void;
   onShare: () => void;
-  /** With the sound and speed buttons. Phones have those in the bar under the video instead. */
+  /** Opens the transcript. Without it there is no transcript button: wide screens show it beside the video. */
+  onTranscript?: () => void;
+  transcriptOpen?: boolean;
+  /** With the sound and speed buttons. Phones have them in the row under the video instead. */
   playback?: boolean;
   className?: string;
 }
@@ -69,6 +95,8 @@ export function Actions({
   onMute,
   onSpeed,
   onShare,
+  onTranscript,
+  transcriptOpen = false,
   playback = true,
   className,
 }: Props) {
@@ -82,7 +110,7 @@ export function Actions({
   };
 
   return (
-    <div className={cn("flex items-center gap-3", className)}>
+    <div className={cn("flex items-center gap-3 max-md:short:gap-2", className)}>
       <IconButton label={liked ? "Unlike" : "Like"} active={liked} onClick={like}>
         <span className="relative grid place-items-center">
           <Heart size={22} className={cn(liked && "fill-rose-500 text-rose-500", bursting && "like-pop")} />
@@ -112,6 +140,11 @@ export function Actions({
       >
         <Languages size={21} />
       </IconButton>
+      {onTranscript && (
+        <IconButton label="Transcript" active={transcriptOpen} onClick={onTranscript}>
+          <TranscriptIcon />
+        </IconButton>
+      )}
       {playback && (
         <>
           <IconButton label={muted ? "Unmute" : "Mute"} onClick={onMute}>

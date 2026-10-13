@@ -153,7 +153,7 @@ const FAQ = [
   },
   {
     q: "Do I need to sign up?",
-    a: "No. There are no accounts. Your saved words, liked videos and settings stay in this browser on this device.",
+    a: "No. You can sign in with your Google account, but you do not have to. Your saved words, liked videos and settings stay in this browser on this device.",
   },
   {
     q: "Where do the videos come from?",

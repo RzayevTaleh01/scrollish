@@ -4,8 +4,8 @@
  * and the brand color always carrying dark ink, as in the logo.
  *
  * Radii, and nothing in between: 6px (rounded-md) tags and badges; 8px (rounded-lg) tiles, buttons
- * and chips; 12px (rounded-xl) cards on the video; 16px (rounded-2xl) the bars at the bottom of a
- * phone; 20px the video card on a phone; 24px (rounded-3xl) the video on desktop and the sheets;
+ * and chips; 12px (rounded-xl) cards on the video and the video card on a phone; 16px (rounded-2xl)
+ * the bars at the bottom of a phone and the video card on desktop; 24px (rounded-3xl) the sheets;
  * round for icon buttons.
  */
 
@@ -20,10 +20,7 @@ export const PANEL_TITLE = `${HEADLINE} text-3xl`;
 export const ACCENT = "bg-accent text-accent-ink";
 /** A tile on the page: the surface color with a line round it. */
 export const TILE = "rounded-lg border border-line bg-surface";
-/**
- * Phones: the bars that float at the bottom, the player bar and the navigation bar. Glass, since
- * the video passes under the navigation bar as it is swiped (see glass-bar in globals.css).
- */
+/** Phones: the navigation bar floating at the bottom, glass (see glass-bar in globals.css). */
 export const BAR = "rounded-2xl glass-bar";
 /** A tile that can be picked: the line turns to the brand color on hover, the whole tile when picked. */
 export const CHOICE = "liquid rounded-lg border text-left";

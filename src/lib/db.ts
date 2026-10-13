@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import type { DictEntry, FeedItem, Level, Segment, Short, VideoContent } from "./types";
+import type { Account, DictEntry, FeedItem, Level, Segment, Short, VideoContent } from "./types";
 
 /**
  * "deferred": the captions were read and the level estimated, but the video was not analysed
@@ -61,6 +61,23 @@ const SCHEMA = [
   )`,
   `CREATE INDEX IF NOT EXISTS videos_ready ON videos (lang, status)`,
   `CREATE INDEX IF NOT EXISTS dictionary_by_use ON dictionary (lang, uses DESC)`,
+  // Viewers signed in with Google (see auth.ts). `id` is Google's "sub".
+  `CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    picture TEXT,
+    created_at BIGINT NOT NULL,
+    last_login_at BIGINT NOT NULL
+  )`,
+  // Only a hash of the cookie's token is kept, so this table alone cannot be used to sign in.
+  `CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    created_at BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS sessions_by_expiry ON sessions (expires_at)`,
 ];
 
 /** Words too common to be useful dictionary entries (they stay tappable in subtitles). */
@@ -399,4 +416,55 @@ export async function searchDictionary(opts: {
       uses: Number(r.uses),
     })),
   };
+}
+
+function asAccount(r: Record<string, unknown>): Account {
+  return {
+    id: String(r.id),
+    name: String(r.name),
+    email: String(r.email),
+    picture: r.picture ? String(r.picture) : null,
+  };
+}
+
+/** Adds the account on its first sign-in, and keeps its name and picture up to date on the next ones. */
+export async function saveAccount(account: Account): Promise<Account> {
+  const db = await getDb();
+  const now = Date.now();
+  const res = await db.query(
+    `INSERT INTO users (id, email, name, picture, created_at, last_login_at) VALUES ($1, $2, $3, $4, $5, $5)
+     ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, picture = EXCLUDED.picture,
+       last_login_at = EXCLUDED.last_login_at
+     RETURNING id, email, name, picture`,
+    [account.id, account.email, account.name, account.picture, now],
+  );
+  return asAccount(res.rows[0]);
+}
+
+export async function insertSession(tokenHash: string, userId: string, expiresAt: number) {
+  const db = await getDb();
+  const now = Date.now();
+  // Sessions that ran out are cleared here, the only place new ones are made.
+  await db.query("DELETE FROM sessions WHERE expires_at < $1", [now]);
+  await db.query("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)", [
+    tokenHash,
+    userId,
+    now,
+    expiresAt,
+  ]);
+}
+
+export async function accountBySession(tokenHash: string): Promise<Account | null> {
+  const db = await getDb();
+  const res = await db.query(
+    `SELECT u.id, u.email, u.name, u.picture FROM sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.token_hash = $1 AND s.expires_at > $2`,
+    [tokenHash, Date.now()],
+  );
+  return res.rows[0] ? asAccount(res.rows[0]) : null;
+}
+
+export async function deleteSession(tokenHash: string) {
+  const db = await getDb();
+  await db.query("DELETE FROM sessions WHERE token_hash = $1", [tokenHash]);
 }

@@ -1,15 +1,24 @@
 "use client";
 
-import { Check, UserRound, X } from "lucide-react";
-import { useEffect } from "react";
+import { Check, LogOut, UserRound, X } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { useAccount } from "@/lib/account";
 import { cn } from "@/lib/cn";
 import { languageOf, LANGUAGES } from "@/lib/languages";
 import { usePresence } from "@/lib/presence";
 import { useSaved } from "@/lib/saved";
-import { useSettings } from "@/lib/settings";
+import { SUBTITLE_SIZES, useSettings, type SubtitleSize } from "@/lib/settings";
 import { LEVEL_NAME, LEVELS } from "@/lib/types";
 import { ACCENT, BUTTON_SECONDARY, CHOICE, CHOICE_IDLE, CHOICE_PICKED, EYEBROW, HEADLINE, TILE } from "./brand";
 import { LevelBadge } from "./LevelBadge";
+import { ProfileIcon } from "./ProfileIcon";
+
+/** The size choices, each with its name and the size of its "Aa", which shows the difference a little enlarged. */
+const SUBTITLE_CHOICES: Record<SubtitleSize, { label: string; sample: number }> = {
+  small: { label: "Small", sample: 16 },
+  medium: { label: "Medium", sample: 20 },
+  large: { label: "Large", sample: 24 },
+};
 
 interface Props {
   open: boolean;
@@ -23,7 +32,7 @@ interface Props {
  */
 export function Settings({ open, likedCount, onClose }: Props) {
   const { mounted, closing } = usePresence(open);
-  const { language, level, setLanguage, setLevel } = useSettings();
+  const { language, level, subtitleSize, setLanguage, setLevel, setSubtitleSize } = useSettings();
 
   useEffect(() => {
     if (!open) return;
@@ -110,6 +119,37 @@ export function Settings({ open, likedCount, onClose }: Props) {
                   level of each video is an estimate made by AI.
                 </p>
               </section>
+
+              <section>
+                <h3 className={EYEBROW}>Subtitle size</h3>
+                <div className="mt-3 grid grid-cols-3 gap-2 md:gap-3">
+                  {SUBTITLE_SIZES.map((size) => {
+                    const selected = size === subtitleSize;
+                    const { label, sample } = SUBTITLE_CHOICES[size];
+                    return (
+                      <button
+                        key={size}
+                        onClick={() => setSubtitleSize(size)}
+                        aria-pressed={selected}
+                        className={cn(
+                          CHOICE,
+                          "flex flex-col items-center justify-end gap-1.5 px-3 py-3 md:py-4",
+                          selected ? CHOICE_PICKED : CHOICE_IDLE,
+                        )}
+                      >
+                        <span aria-hidden className="font-semibold leading-none" style={{ fontSize: sample }}>
+                          Aa
+                        </span>
+                        <span className={cn("text-xs", selected ? "text-accent-ink/70" : "text-muted")}>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-3 text-sm leading-relaxed text-muted">
+                  For the subtitles on the video. Bigger ones are easier to read and to tap, smaller ones cover less of
+                  the picture.
+                </p>
+              </section>
             </div>
           </div>
         </div>
@@ -150,9 +190,58 @@ function Summary({ likedCount }: { likedCount: number }) {
         <Stat value={likedCount} label="Liked videos" />
         <Stat value={savedCount} label="Saved words" />
       </div>
-      <p className="mt-4 text-xs leading-relaxed text-muted">Kept in this browser. No account needed.</p>
+      <AccountSection />
     </div>
   );
+}
+
+/**
+ * The Google account: who is signed in and a way out, or Google's button to sign in. Without Google
+ * sign-in set up on the server, only the note that everything is kept in this browser.
+ */
+function AccountSection() {
+  const { account, renderButton, signOut } = useAccount();
+
+  if (account) {
+    return (
+      <div className="mt-4 border-t border-line pt-4">
+        <div className="flex items-center gap-3">
+          <ProfileIcon size={40} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[15px] font-semibold">{account.name}</p>
+            <p className="truncate text-sm text-muted">{account.email}</p>
+          </div>
+        </div>
+        <button onClick={signOut} className={cn(BUTTON_SECONDARY, "mt-4 h-10 w-full text-sm")}>
+          <LogOut size={16} />
+          Sign out
+        </button>
+        <p className="mt-3 text-xs leading-relaxed text-muted">Likes and saved words are kept in this browser.</p>
+      </div>
+    );
+  }
+
+  if (renderButton) {
+    return (
+      <div className="mt-4 border-t border-line pt-4">
+        <GoogleButton render={renderButton} />
+        <p className="mt-3 text-xs leading-relaxed text-muted">
+          Sign in with Google, or go on without an account: likes and saved words are kept in this browser.
+        </p>
+      </div>
+    );
+  }
+
+  return <p className="mt-4 text-xs leading-relaxed text-muted">Kept in this browser. No account needed.</p>;
+}
+
+/** Google draws its own button: it holds the height of one meanwhile, so nothing jumps when it arrives. */
+function GoogleButton({ render }: { render: (parent: HTMLElement) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) render(ref.current);
+  }, [render]);
+  return <div ref={ref} className="h-10 w-full overflow-hidden" />;
 }
 
 function Stat({ value, label }: { value: number; label: string }) {

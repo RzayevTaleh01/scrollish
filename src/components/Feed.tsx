@@ -2,6 +2,7 @@
 
 import { ChevronDown, ChevronUp, KeyRound, RotateCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AccountProvider } from "@/lib/account";
 import { topicsForLanguage } from "@/lib/channels";
 import { earlySeed, FEED_PAGE_SIZE, linkedVideo, takeEarlyFeed, videoPath } from "@/lib/boot";
 import { cn } from "@/lib/cn";
@@ -59,29 +60,43 @@ const POLL_MS = 3000;
 const TOAST_MS = 2600;
 const TRANSLATION_KEY = "socialearn:translation";
 const SPEED_KEY = "socialearn:speed";
+const LINE_PAUSE_KEY = "socialearn:linepause";
 /** Set once the viewer has been asked which language and level they want. */
 const ASKED_KEY = "socialearn:asked";
 
 /** `landing` shows the home page before the feed; without it the page opens straight on the video. */
 export function Feed({ landing = false }: { landing?: boolean }) {
   return (
-    <SettingsProvider>
-      <SavedProvider>
-        <FeedScreen landing={landing} />
-      </SavedProvider>
-    </SettingsProvider>
+    <AccountProvider>
+      <SettingsProvider>
+        <SavedProvider>
+          <FeedScreen landing={landing} />
+        </SavedProvider>
+      </SettingsProvider>
+    </AccountProvider>
   );
 }
 
 function FeedScreen({ landing }: { landing: boolean }) {
   const settings = useSettings();
   const [selectedTopic, setTopic] = useState("all");
-  /** Library or Profile, over the feed. Only one at a time: on phones they are tabs. */
+  /** Library, Profile or the page to add a video, over the feed. Only one at a time: on phones they are tabs. */
   const [panel, setPanel] = useState<Panel | null>(null);
-  /** The plus button's question: which YouTube video to add. */
-  const [adding, setAdding] = useState(false);
   const [items, setItems] = useState<FeedItem[]>([]);
   const [active, setActive] = useState(0);
+  /**
+   * Phones: when the viewer moves on to the next video, the video grows up under the top bar and its
+   * chips fade, the logo staying; going back up gives the bar its room again, as on YouTube. A new
+   * feed starts with the bar in its room.
+   */
+  const [barAway, setBarAway] = useState(false);
+  const [lastActive, setLastActive] = useState(0);
+  /** The video on screen is stopped, its play button showing: the chips come back over it meanwhile. */
+  const [videoStopped, setVideoStopped] = useState(false);
+  if (active !== lastActive) {
+    setLastActive(active);
+    setBarAway(active > lastActive);
+  }
   const [status, setStatus] = useState<Status>("loading");
   const [pending, setPending] = useState<FeedPending | null>(null);
   const [started, setStarted] = useState(!landing);
@@ -100,6 +115,8 @@ function FeedScreen({ landing }: { landing: boolean }) {
   const [muted, setMuted] = useState(false);
   const [translation, setTranslation] = useState(true);
   const [speed, setSpeed] = useState(1);
+  /** The videos stop at the end of every line, until the viewer plays on. */
+  const [linePause, setLinePause] = useState(false);
   const [liked, setLiked] = useState<LikedVideo[]>([]);
   const likedIds = useMemo(() => new Set(liked.map((v) => v.id)), [liked]);
   const [toast, setToast] = useState<string | null>(null);
@@ -127,7 +144,7 @@ function FeedScreen({ landing }: { landing: boolean }) {
     () => ({ topic, lang: settings.language, level: settings.level }),
     [topic, settings.language, settings.level],
   );
-  const overlayOpen = panel !== null || adding;
+  const overlayOpen = panel !== null;
 
   const flash = useCallback((message: string) => {
     setToast(message);
@@ -228,6 +245,7 @@ function FeedScreen({ landing }: { landing: boolean }) {
       setTranslation(localStorage.getItem(TRANSLATION_KEY) !== "0");
       const savedSpeed = Number(localStorage.getItem(SPEED_KEY));
       if (savedSpeed >= SPEED_MIN && savedSpeed <= SPEED_MAX) setSpeed(tidySpeed(savedSpeed));
+      setLinePause(localStorage.getItem(LINE_PAUSE_KEY) === "1");
       setAsked(localStorage.getItem(ASKED_KEY) === "1");
     } catch {}
   }, []);
@@ -243,9 +261,10 @@ function FeedScreen({ landing }: { landing: boolean }) {
     };
   }, [soundLocked]);
 
-  // Reloads whenever the topic, the language or the level changes.
+  // Reloads whenever the topic, the language or the level changes. Not for the other settings, like the subtitle size.
+  const { ready: settingsReady, setLanguage } = settings;
   useEffect(() => {
-    if (!settings.ready) return;
+    if (!settingsReady) return;
     const shared = sharedRef.current;
     if (shared?.shownFor && shared.shownFor !== query) {
       sharedRef.current = null;
@@ -253,14 +272,14 @@ function FeedScreen({ landing }: { landing: boolean }) {
       // A shared link carries the language of its video: switch to it before loading.
       const linked = shared.lang;
       shared.lang = null;
-      if (isLanguageId(linked) && linked !== settings.language) {
-        settings.setLanguage(linked);
+      if (isLanguageId(linked) && linked !== query.lang) {
+        setLanguage(linked);
         return;
       }
       shared.shownFor = query;
     }
     load(query, "reset");
-  }, [query, settings, load]);
+  }, [query, settingsReady, setLanguage, load]);
 
   // The address bar follows the video on screen, like YouTube, so the page can be copied or reloaded as is.
   // Not before the first tap: until then the visitor is still on the home page.
@@ -269,6 +288,16 @@ function FeedScreen({ landing }: { landing: boolean }) {
     if (!currentId || !started) return;
     window.history.replaceState(null, "", videoPath(currentId));
   }, [currentId, started]);
+
+  // On <html>, where the room kept for the bar is worked out (--header-h in globals.css).
+  useEffect(() => {
+    const root = document.documentElement;
+    if (barAway) root.dataset.topBar = "away";
+    else delete root.dataset.topBar;
+    return () => {
+      delete root.dataset.topBar;
+    };
+  }, [barAway]);
 
   // While the server is still analysing the first videos, check again every few seconds.
   useEffect(() => {
@@ -366,7 +395,6 @@ function FeedScreen({ landing }: { landing: boolean }) {
   const openVideo = useCallback(
     (id: string, lang: string | null = null) => {
       setPanel(null);
-      setAdding(false);
       if (isLanguageId(lang) && lang !== settings.language) {
         sharedRef.current = { id, lang, shownFor: null };
         settings.setLanguage(lang);
@@ -383,6 +411,15 @@ function FeedScreen({ landing }: { landing: boolean }) {
     try {
       localStorage.setItem(SPEED_KEY, String(next));
     } catch {}
+  }, []);
+
+  const toggleLinePause = useCallback(() => {
+    setLinePause((on) => {
+      try {
+        localStorage.setItem(LINE_PAUSE_KEY, on ? "0" : "1");
+      } catch {}
+      return !on;
+    });
   }, []);
 
   /** Gives up waiting for the video a link asked for, and shows the ordinary feed. */
@@ -458,7 +495,9 @@ function FeedScreen({ landing }: { landing: boolean }) {
         onHome={goHome}
         onOpenLibrary={() => setPanel("library")}
         onOpenProfile={() => setPanel("profile")}
-        onAdd={() => setAdding(true)}
+        onAdd={() => setPanel("add")}
+        overVideo={barAway}
+        chipsAway={barAway && !videoStopped}
       />
 
       {status === "ready" && (
@@ -486,13 +525,16 @@ function FeedScreen({ landing }: { landing: boolean }) {
                 soundLocked={soundLocked}
                 speed={speed}
                 translation={translation}
+                linePause={linePause}
                 liked={likedIds.has(item.id)}
                 onLike={toggleLike}
                 onTranslation={toggleTranslation}
                 onMute={toggleMute}
                 onSpeed={changeSpeed}
+                onLinePause={toggleLinePause}
                 onShare={share}
                 onSettled={setSettledAt}
+                onStopped={setVideoStopped}
                 onSoundBlocked={blockSound}
               />
             );
@@ -523,7 +565,7 @@ function FeedScreen({ landing }: { landing: boolean }) {
 
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-0 bottom-[calc(var(--nav-h)+var(--nav-lift)+var(--seek-h)+1.5rem)] z-50 flex justify-center transition duration-300",
+          "pointer-events-none absolute inset-x-0 bottom-[calc(var(--nav-h)+var(--nav-lift)+var(--info-h)+1.5rem)] z-50 flex justify-center transition duration-300",
           toast ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
         )}
       >
@@ -539,8 +581,8 @@ function FeedScreen({ landing }: { landing: boolean }) {
         onClose={() => setPanel(null)}
       />
       <Settings open={panel === "profile"} likedCount={liked.length} onClose={() => setPanel(null)} />
-      <AddVideo open={adding} onOpen={openVideo} onClose={() => setAdding(false)} />
-      <BottomNav panel={panel} onHome={goHome} onSelect={setPanel} onAdd={() => setAdding(true)} />
+      <AddVideo open={panel === "add"} onOpen={openVideo} onClose={() => setPanel(null)} />
+      <BottomNav panel={panel} onHome={goHome} onSelect={setPanel} />
       {home && <Landing open={!started} items={items} onStart={begin} onLanguage={settings.setLanguage} />}
       <Onboarding open={asking} onBack={() => setAsking(false)} onDone={finishAsking} />
     </main>

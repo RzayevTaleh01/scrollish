@@ -17,6 +17,8 @@ export function useMediaQuery(query: string): boolean {
 
 /** Wide enough for the transcript panel next to the video, like YouTube Shorts on desktop. */
 export const WIDE_QUERY = "(min-width: 1024px)";
+/** Too short for everything at full size: the `short` variant in globals.css. */
+export const SHORT_QUERY = "(max-height: 700px)";
 
 /**
  * A phone, or another device with little to spare. A YouTube player is a whole page of YouTube's

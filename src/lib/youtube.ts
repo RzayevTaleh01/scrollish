@@ -24,7 +24,13 @@ interface PlaylistRes {
 interface VideosRes {
   items?: {
     id: string;
-    snippet: { title: string; channelId: string; channelTitle: string };
+    snippet: {
+      title: string;
+      channelId: string;
+      channelTitle: string;
+      defaultAudioLanguage?: string;
+      defaultLanguage?: string;
+    };
     contentDetails: { duration: string; caption?: string };
     status: { embeddable: boolean; privacyStatus: string };
   }[];
@@ -124,6 +130,8 @@ async function buildPool(): Promise<Short[]> {
 export type FoundVideo = Omit<Short, "lang" | "topics"> & {
   /** Public and allowed to play inside other sites. */
   playable: boolean;
+  /** The language its uploader says it is spoken in ("en", "en-US"...), when they said. */
+  audioLanguage: string | null;
 };
 
 /** One video by its id, for a link to a video that is not in the pool. Null when YouTube does not know it. */
@@ -143,6 +151,7 @@ export async function fetchVideo(id: string): Promise<FoundVideo | null> {
     duration: toSeconds(video.contentDetails.duration),
     captions: video.contentDetails.caption === "true",
     playable: video.status.embeddable && video.status.privacyStatus === "public",
+    audioLanguage: video.snippet.defaultAudioLanguage ?? video.snippet.defaultLanguage ?? null,
   };
 }
 

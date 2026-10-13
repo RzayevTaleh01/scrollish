@@ -57,6 +57,28 @@ export interface FeedPending {
   error: string | null;
 }
 
+/** One check of a video before it is opened by its link: passed, failed, or not possible to tell yet. */
+export interface CheckStep {
+  state: "ok" | "fail" | "unknown";
+  /** What was found, in a few words for the viewer. */
+  detail: string;
+}
+
+/** What the page to add a video finds out before sending the viewer on to the video. */
+export interface VideoCheck {
+  /** No check failed: the video can be opened. Checks that could not tell do not stop it. */
+  ok: boolean;
+  /** Prepared before, so it opens at once. */
+  ready: boolean;
+  title: string;
+  channelTitle: string;
+  video: CheckStep;
+  language: CheckStep;
+  subtitles: CheckStep;
+  /** Why it cannot be opened, when a check failed. */
+  reason: string | null;
+}
+
 export interface Token {
   /** Text as shown, punctuation included. */
   t: string;
@@ -112,4 +134,12 @@ export interface DictEntry {
   exampleTr: string;
   videoId: string | null;
   uses: number;
+}
+
+/** A viewer signed in with Google. `id` is Google's id for the account, which never changes. */
+export interface Account {
+  id: string;
+  name: string;
+  email: string;
+  picture: string | null;
 }

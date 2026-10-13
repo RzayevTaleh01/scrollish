@@ -14,7 +14,7 @@ export function CardFrame({ children, pulse }: { children?: ReactNode; pulse?: b
     <div className="absolute inset-0 z-10 flex items-start justify-center pt-[var(--top)]">
       <div
         className={cn(
-          "relative flex flex-col items-center justify-center gap-3 overflow-hidden rounded-[20px] bg-surface px-8 text-center md:rounded-3xl",
+          "relative flex flex-col items-center justify-center gap-3 overflow-hidden rounded-xl bg-surface px-8 text-center md:rounded-2xl",
           pulse && "animate-pulse",
         )}
         style={{ width: "var(--card-w)", height: "var(--card-h)" }}

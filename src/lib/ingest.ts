@@ -371,7 +371,7 @@ const gr = globalThis as unknown as { __socialearnRequests?: Requests };
 const requests: Requests = (gr.__socialearnRequests ??= { inFlight: new Set(), waiting: new Map(), started: [] });
 
 /** Longer videos are not Shorts, and their subtitles would not fit one Gemini answer. */
-const REQUEST_MAX_SECONDS = 180;
+export const REQUEST_MAX_SECONDS = 180;
 const REQUESTS_AT_ONCE = 2;
 const REQUESTS_PER_HOUR = 30;
 const HOUR_MS = 60 * 60 * 1000;
@@ -384,17 +384,22 @@ const UNAVAILABLE: Partial<Record<VideoStatus, string>> = {
 
 export type RequestOutcome = { pending: true; error: string | null } | { pending: false; reason: string };
 
+/** Why a video that was tried before will never be ready, in words for the viewer, or null. */
+export function unavailableReason(row: VideoRow | null): string | null {
+  if (row?.status === "rejected") return row.error ?? "This video cannot be opened here";
+  const unavailable = row && UNAVAILABLE[row.status];
+  if (unavailable) return unavailable;
+  if (row?.status === "failed" && row.attempts >= MAX_ATTEMPTS) return "This video could not be prepared";
+  return null;
+}
+
 /**
  * Asks for a video that is not ready to be prepared, and says where that stands: under way (with
  * the reason for a delay, if any), or not possible for this video.
  */
 export function requestVideo(id: string, preferred: LanguageId, row: VideoRow | null): RequestOutcome {
-  if (row?.status === "rejected") return { pending: false, reason: row.error ?? "This video cannot be opened here" };
-  const unavailable = row && UNAVAILABLE[row.status];
+  const unavailable = unavailableReason(row);
   if (unavailable) return { pending: false, reason: unavailable };
-  if (row?.status === "failed" && row.attempts >= MAX_ATTEMPTS) {
-    return { pending: false, reason: "This video could not be prepared" };
-  }
   if (!hasGeminiKey()) return { pending: false, reason: "New videos cannot be prepared right now" };
 
   const now = Date.now();

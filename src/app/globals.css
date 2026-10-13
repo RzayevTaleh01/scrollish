@@ -3,6 +3,17 @@
 /* Screens too short for everything: small phones, browser bars, laptops with a short window. */
 @custom-variant short (@media (max-height: 700px));
 
+/*
+ * The space kept for the top bar, registered as a length so that it can be animated: on phones, as
+ * the viewer moves on to the next video, the chips fade and every video card grows up under the
+ * row, the logo staying over its corner (see data-top-bar below).
+ */
+@property --header-h {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 52px;
+}
+
 /* Flat design system: solid colors only, no gradients. Change the brand color in one place here. */
 :root {
   --bg: #0f0f0f;
@@ -20,19 +31,24 @@
 
   /*
    * Video card, like YouTube Shorts: it starts below the header and takes all the height that is left.
-   * Phones, top to bottom: the header, the card with a little space either side, the seek bar
-   * and the navigation bar. Desktop: the header, then a card exactly 9:16, never cropped.
+   * Phones, top to bottom: the header, the card with a little space either side, the channel row
+   * and the navigation bar. Desktop: the header, then a card exactly 9:16, never cropped, and the
+   * channel row under it.
    */
-  --header-h: 52px;
+  /* Phones: the top bar's own height, and the space kept for it, which is less while the video has grown up under it. */
+  --bar-h: 52px;
+  --header-h: var(--bar-h);
   --gap: 0px;
   --top: calc(var(--header-h) + env(safe-area-inset-top, 0px));
   /*
-   * Phones: the player bar under the video, and the navigation bar floating above the bottom edge.
-   * Both are glass (BAR in components/brand.ts); these are the heights kept free for them, margins included.
+   * The channel row under the video, joined to it as one card (VideoInfo), and on phones the
+   * navigation bar floating above the bottom edge (BAR in components/brand.ts): the heights kept
+   * free for them, margins included. The bar is 48px with 8px above and below it, as wide as the
+   * margins beside the card.
    */
-  --seek-h: 52px;
-  --nav-h: calc(60px + env(safe-area-inset-bottom));
-  /* The round plus in the middle of the navigation bar rises this far above it, into space kept free for it. */
+  --info-h: 52px;
+  --nav-h: calc(64px + env(safe-area-inset-bottom));
+  /* The plus in the middle of the navigation bar rises this far above it, into space kept free for it. */
   --nav-lift: 8px;
   /*
    * Phones: YouTube draws its logo and buttons along the top of the video, and its title along the
@@ -41,7 +57,7 @@
    */
   --cut-top: 36px;
   --cut-bottom: 72px;
-  --card-h: calc(100dvh - var(--top) - var(--gap) - var(--seek-h) - var(--nav-lift) - var(--nav-h));
+  --card-h: calc(100dvh - var(--top) - var(--gap) - var(--info-h) - var(--nav-lift) - var(--nav-h));
   --card-w: calc(100vw - 16px);
   /*
    * The video keeps 9:16 and covers the card, centred, so on a card of another shape only the
@@ -58,12 +74,25 @@
     --header-h: 108px;
     --gap: 16px;
     --top: calc(var(--header-h) + env(safe-area-inset-top, 0px) + var(--gap));
-    /* No seek bar and no navigation bar on desktop, and the video is shown whole. */
-    --seek-h: 0px;
+    /* No navigation bar on desktop, and the video is shown whole. */
+    --info-h: 64px;
     --nav-h: 0px;
     --nav-lift: 0px;
     --cut-top: 0px;
     --cut-bottom: 0px;
+  }
+}
+
+/*
+ * Phones, while the video has the top bar's room (Feed sets data-top-bar on <html>): what is kept of it
+ * is a margin above the card as wide as the ones beside it. In the same time as the chips fade (TopBar).
+ */
+:root {
+  transition: --header-h 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (max-width: 767px) {
+  :root[data-top-bar="away"] {
+    --header-h: 8px;
   }
 }
 
@@ -194,9 +223,9 @@ button:disabled {
 }
 
 /*
- * Phones: the bars at the bottom. The next video slides under the navigation bar as it is swiped
- * in, so they are glass: the page's dark, half see-through, with the picture behind blurred.
- * A faint line round them and nothing else: no shadow, no glow.
+ * Phones: the navigation bar at the bottom. The next video slides under it as it is swiped in, so
+ * it is glass: the page's dark, half see-through, with the picture behind blurred. A faint line
+ * round it and nothing else: no shadow, no glow.
  */
 @utility glass-bar {
   background-color: rgb(15 15 15 / 0.62);
@@ -204,6 +233,18 @@ button:disabled {
   backdrop-filter: blur(20px) saturate(160%);
   border: 1px solid rgb(255 255 255 / 0.08);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+/*
+ * The topic chips at the top. Lighter glass than the bars, so their names stand out on the page's
+ * dark, and see-through over the video when they come back over it while it is stopped.
+ */
+@utility glass-chip {
+  background-color: rgb(255 255 255 / 0.12);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18);
 }
 
 /* On the page background or inside a panel, where there is nothing to blur. */
@@ -606,6 +647,27 @@ button:disabled {
   }
 }
 
+/* The answer to a double tap on the video: it pops up on the side that was tapped and fades. */
+.line-step {
+  animation: line-step 0.7s ease-out both;
+}
+@keyframes line-step {
+  0% {
+    scale: 0.8;
+    opacity: 0;
+  }
+  15% {
+    scale: 1;
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 /* A count in the header gives a little jump when it changes. */
 .count-bump {
   animation: count-bump 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -728,7 +790,8 @@ button:disabled {
     display: none;
   }
   .like-pop,
-  .count-bump {
+  .count-bump,
+  .line-step {
     animation: none;
   }
   .phone-feed,
@@ -756,6 +819,9 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    transition: none;
+  }
   .animate-fade-in,
   .animate-rise,
   .animate-fade-quick,
